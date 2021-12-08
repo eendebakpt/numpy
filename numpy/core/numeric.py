@@ -187,17 +187,14 @@ def ones(shape, dtype=None, order='C', *, like=None):
 
     """
     if like is not None:
-        return _ones_with_like(shape, dtype=dtype, order=order, like=like)
+        return like.__array_function__(ones, (type(like),), (shape,),
+                                dict(dtype=dtype, order=order))
 
     a = empty(shape, dtype, order)
     multiarray.copyto(a, 1, casting='unsafe')
     return a
 
-
-_ones_with_like = array_function_dispatch(
-    _ones_dispatcher
-)(ones)
-
+ones._implementation = ones
 
 def _ones_like_dispatcher(a, dtype=None, order=None, subok=None, shape=None):
     return (a,)

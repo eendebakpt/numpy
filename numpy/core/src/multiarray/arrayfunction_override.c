@@ -647,8 +647,6 @@ dispatcher_vectorcall(PyArray_ArrayFunctionDispatcherObject *self,
         PyTuple_SET_ITEM(types, j, arg_type);
     }
 
-
-
     /* Call __array_function__ methods */
     for (int j = 0; j < num_implementing_args; j++) {
         PyObject *argument = implementing_args[j];
