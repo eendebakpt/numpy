@@ -6,7 +6,8 @@ import os
 from .._utils import set_module
 from .._utils._inspect import getargspec
 from numpy.core._multiarray_umath import (
-    add_docstring, implement_array_function, _get_implementing_args)
+    add_docstring, implement_array_function, _get_implementing_args,
+    _ArrayFunctionDispatcher)
 
 
 ARRAY_FUNCTIONS = set()
@@ -159,39 +160,10 @@ def array_function_dispatch(dispatcher, module=None, verify=True,
         if docs_from_dispatcher:
             add_docstring(implementation, dispatcher.__doc__)
 
-        @functools.wraps(implementation)
-        def public_api(*args, **kwargs):
-            try:
-                relevant_args = dispatcher(*args, **kwargs)
-            except TypeError as exc:
-                # Try to clean up a signature related TypeError.  Such an
-                # error will be something like:
-                #     dispatcher.__name__() got an unexpected keyword argument
-                #
-                # So replace the dispatcher name in this case.  In principle
-                # TypeErrors may be raised from _within_ the dispatcher, so
-                # we check that the traceback contains a string that starts
-                # with the name.  (In principle we could also check the
-                # traceback length, as it would be deeper.)
-                msg = exc.args[0]
-                disp_name = dispatcher.__name__
-                if not isinstance(msg, str) or not msg.startswith(disp_name):
-                    raise
-
-                # Replace with the correct name and re-raise:
-                new_msg = msg.replace(disp_name, public_api.__name__)
-                raise TypeError(new_msg) from None
-
-            return implement_array_function(
-                implementation, public_api, relevant_args, args, kwargs)
-
-        public_api.__code__ = public_api.__code__.replace(
-                co_name=implementation.__name__,
-                co_filename='<__array_function__ internals>')
+        public_api = _ArrayFunctionDispatcher(dispatcher, implementation)
+        public_api = functools.wraps(implementation)(public_api)
         if module is not None:
             public_api.__module__ = module
-
-        public_api._implementation = implementation
 
         ARRAY_FUNCTIONS.add(public_api)
 

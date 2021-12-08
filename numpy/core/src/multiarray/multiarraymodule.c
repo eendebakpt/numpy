@@ -5112,6 +5112,12 @@ PyMODINIT_FUNC PyInit__multiarray_umath(void) {
     if (set_typeinfo(d) != 0) {
         goto err;
     }
+    if (PyType_Ready(&PyArrayFunctionDispatcher_Type) < 0) {
+        goto err;
+    }
+    PyDict_SetItemString(
+            d, "_ArrayFunctionDispatcher",
+            (PyObject *)&PyArrayFunctionDispatcher_Type);
     if (PyType_Ready(&PyArrayMethod_Type) < 0) {
         goto err;
     }
