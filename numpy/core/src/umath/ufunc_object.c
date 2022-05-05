@@ -1106,6 +1106,8 @@ check_for_trivial_loop(PyArrayMethodObject *ufuncimpl,
                                 && PyArray_DIM(op[i], 0) <= buffersize))) {
                 PyArrayObject *tmp;
                 Py_INCREF(dtypes[i]);
+                //printf("call to PyArray_CastToType must_copy %d i %d nin %d PyArray_NDIM(op[i]) %d buffersize %d\n",
+                //       must_copy, i, nin, PyArray_NDIM(op[i]),buffersize );
                 tmp = (PyArrayObject *)PyArray_CastToType(op[i], dtypes[i], 0);
                 if (tmp == NULL) {
                     return -1;
@@ -1294,6 +1296,11 @@ try_trivial_single_output_loop(PyArrayMethod_Context *context,
     else {
         /* If any input overlaps with the output, we use the full path. */
         for (int iop = 0; iop < nin; iop++) {
+            int xx = PyArray_EQUIVALENTLY_ITERABLE_OVERLAP_OK(
+                    op[iop], op[nin],
+                    PyArray_TRIVIALLY_ITERABLE_OP_READ,
+                    PyArray_TRIVIALLY_ITERABLE_OP_NOREAD);
+            printf("iop %d xx %d\n", iop, xx);
             if (!PyArray_EQUIVALENTLY_ITERABLE_OVERLAP_OK(
                     op[iop], op[nin],
                     PyArray_TRIVIALLY_ITERABLE_OP_READ,
@@ -2659,6 +2666,7 @@ PyUFunc_GenericFunctionInternal(PyUFuncObject *ufunc,
             int retval = try_trivial_single_output_loop(&context,
                     op, order, output_array_prepare, full_args,
                     errormask, extobj);
+            printf("PyUFunc_GenericFunctionInternal: output of try_trivial_single_output_loop %d\n", retval);
             if (retval != -2) {
                 return retval;
             }
@@ -3105,8 +3113,10 @@ PyUFunc_Accumulate(PyUFuncObject *ufunc, PyArrayObject *arr, PyArrayObject *out,
     }
     /* If input and output overlap in memory, use iterator to figure it out */
     else if (out != NULL && solve_may_share_memory(out, arr, NPY_MAY_SHARE_BOUNDS) != 0) {
+        printf("here out %ld\n", (long)(out) );
         need_outer_iterator = 1;
     }
+    printf("need_outer_iterator %ld\n", (long)(need_outer_iterator) );
 
     if (need_outer_iterator) {
         int ndim_iter = 0;
@@ -4647,6 +4657,18 @@ replace_with_wrapped_result_and_return(PyUFuncObject *ufunc,
     return NULL;
 }
 
+#include <stdio.h>
+#include <stdlib.h>
+
+void dump (const char *msg) {
+   FILE * fp;
+
+   fp = fopen ("debug.txt", "a+");
+   fprintf(fp, "%s", msg);
+   
+   fclose(fp);
+   
+}
 
 /*
  * Main ufunc call implementation.
@@ -4664,7 +4686,9 @@ ufunc_generic_fastcall(PyUFuncObject *ufunc,
 {
     int errval;
     int nin = ufunc->nin, nout = ufunc->nout, nop = ufunc->nargs;
-
+    //printf("ufunc_generic_fastcall nin %d, nout %d, nop %d\n", nin, nout, nop);
+    
+    
     /* All following variables are cleared in the `fail` error path */
     ufunc_full_args full_args;
     PyArrayObject *wheremask = NULL;
@@ -4791,7 +4815,8 @@ ufunc_generic_fastcall(PyUFuncObject *ufunc,
                 goto fail;
             }
         }
-
+        
+        printf("  out_obj != NULL) %d\n", out_obj != NULL);
         /* Handle `out` arguments passed by keyword */
         if (out_obj != NULL) {
             if (out_is_passed_by_position) {
@@ -4903,6 +4928,9 @@ ufunc_generic_fastcall(PyUFuncObject *ufunc,
      * Do the final preparations and call the inner-loop.
      */
     if (!ufunc->core_enabled) {
+        print_ufunc(*ufunc);
+        printf("  call to PyUFunc_GenericFunctionInternal (out_is_passed_by_position %d, )\n", out_is_passed_by_position);
+         
         errval = PyUFunc_GenericFunctionInternal(ufunc, ufuncimpl,
                 operation_descrs, operands, extobj, casting, order,
                 output_array_prepare, full_args,  /* for __array_prepare__ */

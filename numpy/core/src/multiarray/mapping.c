@@ -744,6 +744,7 @@ index_has_memory_overlap(PyArrayObject *self,
 
     if (index_type & (HAS_FANCY | HAS_BOOL)) {
         for (i = 0; i < num; ++i) {
+            printf("index_has_memory_overlap\n");
             if (indices[i].object != NULL &&
                     PyArray_Check(indices[i].object) &&
                     solve_may_share_memory(self,
@@ -753,6 +754,7 @@ index_has_memory_overlap(PyArrayObject *self,
             }
         }
     }
+    printf("index_has_memory_overlap\n");
 
     if (extra_op != NULL && PyArray_Check(extra_op) &&
             solve_may_share_memory(self, (PyArrayObject *)extra_op, 1) != 0) {

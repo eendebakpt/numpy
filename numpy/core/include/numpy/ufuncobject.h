@@ -220,6 +220,12 @@ typedef struct _tagPyUFuncObject {
         PyObject *_loops;
 } PyUFuncObject;
 
+inline void print_ufunc(const PyUFuncObject u) 
+{
+    printf("ufunc: %s: nin %d nout %d: identity %d\n", u.name, u.nin, u.nout, u.identity);
+}
+
+
 #include "arrayobject.h"
 /* Generalized ufunc; 0x0001 reserved for possible use as CORE_ENABLED */
 /* the core dimension's size will be determined by the operands. */

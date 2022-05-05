@@ -4151,6 +4151,7 @@ array_shares_memory_impl(PyObject *args, PyObject *kwds, Py_ssize_t default_max_
         goto fail;
     }
 
+    printf("array_shares_memory_impl\n");
     NPY_BEGIN_THREADS;
     result = solve_may_share_memory(self, other, max_work);
     NPY_END_THREADS;

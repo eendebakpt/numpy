@@ -758,6 +758,7 @@ NPY_VISIBILITY_HIDDEN mem_overlap_t
 solve_may_share_memory(PyArrayObject *a, PyArrayObject *b,
                        Py_ssize_t max_work)
 {
+    PySys_WriteStdout("solve_may_share_memory\n");
     npy_int64 rhs;
     diophantine_term_t terms[2*NPY_MAXDIMS + 2];
     npy_uintp start1 = 0, end1 = 0, size1 = 0;

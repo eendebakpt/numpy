@@ -697,6 +697,7 @@ PyArray_Round(PyArrayObject *a, int decimals, PyArrayObject *out)
     Py_DECREF(out);
     if (ret_int) {
         Py_INCREF(PyArray_DESCR(a));
+        printf("in round?\n");
         tmp = PyArray_CastToType((PyArrayObject *)ret,
                                  PyArray_DESCR(a), PyArray_ISFORTRAN(a));
         Py_DECREF(ret);

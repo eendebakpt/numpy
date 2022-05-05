@@ -156,6 +156,8 @@ arrays_overlap(PyArrayObject *arr1, PyArrayObject *arr2)
 {
     mem_overlap_t result;
 
+    printf("arrays_overlap\n");
+
     result = solve_may_share_memory(arr1, arr2, NPY_MAY_SHARE_BOUNDS);
     if (result == MEM_OVERLAP_NO) {
         return 0;

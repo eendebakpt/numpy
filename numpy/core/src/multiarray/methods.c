@@ -1073,6 +1073,7 @@ array_getarray(PyArrayObject *self, PyObject *args)
         return (PyObject *)self;
     }
     else {
+        printf("array_getarray: call to PyArray_CastToType\n");
         ret = PyArray_CastToType(self, newtype, 0);
         Py_DECREF(self);
         return ret;

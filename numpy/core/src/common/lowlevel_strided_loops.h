@@ -685,6 +685,8 @@ static NPY_INLINE int
 PyArray_EQUIVALENTLY_ITERABLE_OVERLAP_OK(PyArrayObject *arr1, PyArrayObject *arr2,
                                          int arr1_read, int arr2_read)
 {
+    //printf("PyArray_EQUIVALENTLY_ITERABLE_OVERLAP_OK \n" );
+
     npy_intp size1, size2, stride1, stride2;
     int arr1_ahead = 0, arr2_ahead = 0;
 
@@ -695,6 +697,7 @@ PyArray_EQUIVALENTLY_ITERABLE_OVERLAP_OK(PyArrayObject *arr1, PyArrayObject *arr
     if (solve_may_share_memory(arr1, arr2, 1) == 0) {
         return 1;
     }
+    //printf("PyArray_EQUIVALENTLY_ITERABLE_OVERLAP_OK deep\n" );
 
     /*
      * Arrays overlapping in memory may be equivalently iterable if input
@@ -730,7 +733,11 @@ PyArray_EQUIVALENTLY_ITERABLE_OVERLAP_OK(PyArrayObject *arr1, PyArrayObject *arr
                       PyArray_BYTES(arr2) <= PyArray_BYTES(arr1));
     }
 
-    return (!arr1_read || arr1_ahead) && (!arr2_read || arr2_ahead);
+
+    int val= (!arr1_read || arr1_ahead) && (!arr2_read || arr2_ahead);
+    printf("PyArray_EQUIVALENTLY_ITERABLE_OVERLAP_OK : final %d\n",val );
+    
+    return val;
 }
 
 #define PyArray_EQUIVALENTLY_ITERABLE_BASE(arr1, arr2) (            \

@@ -416,6 +416,7 @@ new_array_for_sum(PyArrayObject *ap1, PyArrayObject *ap2, PyArrayObject* out,
             }
         }
 
+        printf("new_array_for_sum\n");
         /* check for memory overlap */
         if (!(solve_may_share_memory(out, ap1, 1) == 0 &&
               solve_may_share_memory(out, ap2, 1) == 0)) {
