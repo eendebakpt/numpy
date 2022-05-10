@@ -418,10 +418,8 @@ NPY_NO_EXPORT void *
 PyDataMem_UserNEW(size_t size, PyObject *mem_handler)
 {
     void *result;
-    PyDataMem_Handler *handler = (PyDataMem_Handler *) PyCapsule_GetPointer(mem_handler, "mem_handler");
-    if (handler == NULL) {
-        return NULL;
-    }
+    PyDataMem_Handler *handler = &default_handler;
+
     assert(size != 0);
     result = handler->allocator.malloc(handler->allocator.ctx, size);
     if (_PyDataMem_eventhook != NULL) {
@@ -441,10 +439,8 @@ NPY_NO_EXPORT void *
 PyDataMem_UserNEW_ZEROED(size_t nmemb, size_t size, PyObject *mem_handler)
 {
     void *result;
-    PyDataMem_Handler *handler = (PyDataMem_Handler *) PyCapsule_GetPointer(mem_handler, "mem_handler");
-    if (handler == NULL) {
-        return NULL;
-    }
+    PyDataMem_Handler *handler = &default_handler;
+    
     result = handler->allocator.calloc(handler->allocator.ctx, nmemb, size);
     if (_PyDataMem_eventhook != NULL) {
         NPY_ALLOW_C_API_DEF
@@ -463,12 +459,8 @@ PyDataMem_UserNEW_ZEROED(size_t nmemb, size_t size, PyObject *mem_handler)
 NPY_NO_EXPORT void
 PyDataMem_UserFREE(void *ptr, size_t size, PyObject *mem_handler)
 {
-    PyDataMem_Handler *handler = (PyDataMem_Handler *) PyCapsule_GetPointer(mem_handler, "mem_handler");
-    if (handler == NULL) {
-        WARN_NO_RETURN(PyExc_RuntimeWarning,
-                     "Could not get pointer to 'mem_handler' from PyCapsule");
-        return;
-    }
+    PyDataMem_Handler *handler = &default_handler;
+
     PyTraceMalloc_Untrack(NPY_TRACE_DOMAIN, (npy_uintp)ptr);
     handler->allocator.free(handler->allocator.ctx, ptr, size);
     if (_PyDataMem_eventhook != NULL) {
@@ -486,10 +478,8 @@ NPY_NO_EXPORT void *
 PyDataMem_UserRENEW(void *ptr, size_t size, PyObject *mem_handler)
 {
     void *result;
-    PyDataMem_Handler *handler = (PyDataMem_Handler *) PyCapsule_GetPointer(mem_handler, "mem_handler");
-    if (handler == NULL) {
-        return NULL;
-    }
+    PyDataMem_Handler *handler = &default_handler;
+
 
     assert(size != 0);
     result = handler->allocator.realloc(handler->allocator.ctx, ptr, size);
@@ -558,6 +548,8 @@ PyDataMem_SetHandler(PyObject *handler)
 #endif
 }
 
+static PyObject *static_handler = NULL;
+
 /*NUMPY_API
  * Return the policy that will be used to allocate data
  * for the next PyArrayObject. On failure, return NULL.
@@ -565,11 +557,20 @@ PyDataMem_SetHandler(PyObject *handler)
 NPY_NO_EXPORT PyObject *
 PyDataMem_GetHandler()
 {
+    
+    if (static_handler) {
+        Py_XINCREF(static_handler);
+        return static_handler;
+}
+
     PyObject *handler;
 #if (!defined(PYPY_VERSION_NUM) || PYPY_VERSION_NUM >= 0x07030600)
     if (PyContextVar_Get(current_handler, NULL, &handler)) {
         return NULL;
     }
+    //printf("PyDataMem_GetHandler: static_handler %ld, handler %ld\n", (long)static_handler, (long)(handler));
+    static_handler=handler;
+    Py_XINCREF(handler);
     return handler;
 #else
     PyObject *p = PyThreadState_GetDict();
