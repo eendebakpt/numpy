@@ -688,7 +688,16 @@ PyArray_EQUIVALENTLY_ITERABLE_OVERLAP_OK(PyArrayObject *arr1, PyArrayObject *arr
     npy_intp size1, size2, stride1, stride2;
     int arr1_ahead = 0, arr2_ahead = 0;
 
+    
     if (arr1_read && arr2_read) {
+        return 1;
+    }
+
+    size1 = PyArray_SIZE(arr1);
+    stride1 = PyArray_TRIVIAL_PAIR_ITERATION_STRIDE(size1, arr1);
+
+    if (arr1 == arr2 && stride1 !=0) {
+        // case common for inplace operations
         return 1;
     }
 
@@ -701,10 +710,7 @@ PyArray_EQUIVALENTLY_ITERABLE_OVERLAP_OK(PyArrayObject *arr1, PyArrayObject *arr
      * arrays stride ahead faster than output arrays.
      */
 
-    size1 = PyArray_SIZE(arr1);
     size2 = PyArray_SIZE(arr2);
-
-    stride1 = PyArray_TRIVIAL_PAIR_ITERATION_STRIDE(size1, arr1);
     stride2 = PyArray_TRIVIAL_PAIR_ITERATION_STRIDE(size2, arr2);
 
     /*
