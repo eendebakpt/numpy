@@ -414,11 +414,23 @@ int uo_index=0;   /* user_override index */
 
 /* Wrappers for the default or any user-assigned PyDataMem_Handler */
 
+int default_allocator_policy = 1;
+
+static inline PyDataMem_Handler *
+_PyDataMem_GetHandler_Internal()
+{
+    if (default_allocator_policy)
+        return &default_handler;
+    PyObject *mem_handler = PyDataMem_GetHandler();
+    PyDataMem_Handler *handler = (PyDataMem_Handler *) PyCapsule_GetPointer(mem_handler, "mem_handler");
+    return handler;
+}
+
 NPY_NO_EXPORT void *
 PyDataMem_UserNEW(size_t size, PyObject *mem_handler)
 {
     void *result;
-    PyDataMem_Handler *handler = (PyDataMem_Handler *) PyCapsule_GetPointer(mem_handler, "mem_handler");
+    PyDataMem_Handler *handler = _PyDataMem_GetHandler_Internal();
     if (handler == NULL) {
         return NULL;
     }
@@ -441,7 +453,7 @@ NPY_NO_EXPORT void *
 PyDataMem_UserNEW_ZEROED(size_t nmemb, size_t size, PyObject *mem_handler)
 {
     void *result;
-    PyDataMem_Handler *handler = (PyDataMem_Handler *) PyCapsule_GetPointer(mem_handler, "mem_handler");
+    PyDataMem_Handler *handler = _PyDataMem_GetHandler_Internal();
     if (handler == NULL) {
         return NULL;
     }
@@ -463,7 +475,7 @@ PyDataMem_UserNEW_ZEROED(size_t nmemb, size_t size, PyObject *mem_handler)
 NPY_NO_EXPORT void
 PyDataMem_UserFREE(void *ptr, size_t size, PyObject *mem_handler)
 {
-    PyDataMem_Handler *handler = (PyDataMem_Handler *) PyCapsule_GetPointer(mem_handler, "mem_handler");
+    PyDataMem_Handler *handler = _PyDataMem_GetHandler_Internal();
     if (handler == NULL) {
         WARN_NO_RETURN(PyExc_RuntimeWarning,
                      "Could not get pointer to 'mem_handler' from PyCapsule");
@@ -486,7 +498,7 @@ NPY_NO_EXPORT void *
 PyDataMem_UserRENEW(void *ptr, size_t size, PyObject *mem_handler)
 {
     void *result;
-    PyDataMem_Handler *handler = (PyDataMem_Handler *) PyCapsule_GetPointer(mem_handler, "mem_handler");
+    PyDataMem_Handler *handler = _PyDataMem_GetHandler_Internal();
     if (handler == NULL) {
         return NULL;
     }
@@ -509,8 +521,6 @@ PyDataMem_UserRENEW(void *ptr, size_t size, PyObject *mem_handler)
     return result;
 }
 
-PyObject * default_allocator_policy = -1;
-
 
 /*NUMPY_API
  * Set a new allocation policy. If the input value is NULL, will reset
@@ -524,7 +534,6 @@ PyDataMem_SetHandler(PyObject *handler)
 {
     // once the user sets an allocation policy, we cannot guarantee the default allocator without checking the context
     default_allocator_policy = 0;
-    printf("PyDataMem_SetHandler\n");
     
     PyObject *old_handler;
 #if (!defined(PYPY_VERSION_NUM) || PYPY_VERSION_NUM >= 0x07030600)
@@ -572,18 +581,6 @@ PyDataMem_SetHandler(PyObject *handler)
 NPY_NO_EXPORT PyObject *
 PyDataMem_GetHandler()
 {
-    if (default_allocator_policy==-1) {
-        printf("default_allocator_policy: value -1, so creating default handler\n");
-        // initial allocation
-        default_allocator_policy = PyCapsule_New(&default_handler, "mem_handler", NULL);
-        Py_INCREF(default_allocator_policy);
-    }
-    if (default_allocator_policy) 
-    {
-        Py_INCREF(default_allocator_policy);
-        return default_allocator_policy;
-    }
-    
     PyObject *handler;
 #if (!defined(PYPY_VERSION_NUM) || PYPY_VERSION_NUM >= 0x07030600)
     if (PyContextVar_Get(current_handler, NULL, &handler)) {
