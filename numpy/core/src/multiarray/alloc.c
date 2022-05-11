@@ -509,6 +509,9 @@ PyDataMem_UserRENEW(void *ptr, size_t size, PyObject *mem_handler)
     return result;
 }
 
+PyObject * default_allocator_policy = -1;
+
+
 /*NUMPY_API
  * Set a new allocation policy. If the input value is NULL, will reset
  * the policy to the default. Return the previous policy, or
@@ -519,6 +522,10 @@ PyDataMem_UserRENEW(void *ptr, size_t size, PyObject *mem_handler)
 NPY_NO_EXPORT PyObject *
 PyDataMem_SetHandler(PyObject *handler)
 {
+    // once the user sets an allocation policy, we cannot guarantee the default allocator without checking the context
+    default_allocator_policy = 0;
+    printf("PyDataMem_SetHandler\n");
+    
     PyObject *old_handler;
 #if (!defined(PYPY_VERSION_NUM) || PYPY_VERSION_NUM >= 0x07030600)
     PyObject *token;
@@ -565,6 +572,18 @@ PyDataMem_SetHandler(PyObject *handler)
 NPY_NO_EXPORT PyObject *
 PyDataMem_GetHandler()
 {
+    if (default_allocator_policy==-1) {
+        printf("default_allocator_policy: value -1, so creating default handler\n");
+        // initial allocation
+        default_allocator_policy = PyCapsule_New(&default_handler, "mem_handler", NULL);
+        Py_INCREF(default_allocator_policy);
+    }
+    if (default_allocator_policy) 
+    {
+        Py_INCREF(default_allocator_policy);
+        return default_allocator_policy;
+    }
+    
     PyObject *handler;
 #if (!defined(PYPY_VERSION_NUM) || PYPY_VERSION_NUM >= 0x07030600)
     if (PyContextVar_Get(current_handler, NULL, &handler)) {
