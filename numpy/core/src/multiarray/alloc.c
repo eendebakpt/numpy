@@ -431,7 +431,7 @@ int uo_index=0;   /* user_override index */
 /* Wrappers for the default or any user-assigned PyDataMem_Handler */
 
 static inline PyDataMem_Handler *
-_PyDataMem_PyDataMem_Handler_Internal(PyObject *mem_handler)
+_PyDataMem_GetHandler_Internal(PyObject *mem_handler)
 {
 #if (!defined(PYPY_VERSION_NUM) || PYPY_VERSION_NUM >= 0x07030600)
     if (mem_handler == PyDataMem_DefaultHandler)
@@ -447,7 +447,7 @@ NPY_NO_EXPORT void *
 PyDataMem_UserNEW(size_t size, PyObject *mem_handler)
 {
     void *result;
-    PyDataMem_Handler *handler = _PyDataMem_GetHandler_Internal();
+    PyDataMem_Handler *handler = _PyDataMem_GetHandler_Internal(mem_handler);
     if (handler == NULL) {
         return NULL;
     }
@@ -470,7 +470,7 @@ NPY_NO_EXPORT void *
 PyDataMem_UserNEW_ZEROED(size_t nmemb, size_t size, PyObject *mem_handler)
 {
     void *result;
-    PyDataMem_Handler *handler = _PyDataMem_GetHandler_Internal();
+    PyDataMem_Handler *handler = _PyDataMem_GetHandler_Internal(mem_handler);
     if (handler == NULL) {
         return NULL;
     }
@@ -492,7 +492,7 @@ PyDataMem_UserNEW_ZEROED(size_t nmemb, size_t size, PyObject *mem_handler)
 NPY_NO_EXPORT void
 PyDataMem_UserFREE(void *ptr, size_t size, PyObject *mem_handler)
 {
-    PyDataMem_Handler *handler = _PyDataMem_GetHandler_Internal();
+    PyDataMem_Handler *handler = _PyDataMem_GetHandler_Internal(mem_handler);
     if (handler == NULL) {
         WARN_NO_RETURN(PyExc_RuntimeWarning,
                      "Could not get pointer to 'mem_handler' from PyCapsule");
