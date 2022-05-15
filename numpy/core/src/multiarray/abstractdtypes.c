@@ -57,13 +57,19 @@ float_default_descriptor(PyArray_DTypeMeta* NPY_UNUSED(cls))
     return PyArray_DescrFromType(NPY_DOUBLE);
 }
 
+#include "ndarraytypes.h"
+#include "arraytypes.h"
 
 static PyArray_Descr*
 discover_descriptor_from_pyfloat(
         PyArray_DTypeMeta* NPY_UNUSED(cls), PyObject *obj)
 {
     assert(PyFloat_CheckExact(obj));
-    return PyArray_DescrFromType(NPY_DOUBLE);
+    assert (PyArray_DescrFromType(NPY_DOUBLE)==DOUBLE_Descr);
+    Py_INCREF(_builtin_descrs[NPY_DOUBLE]);
+    return _builtin_descrs[NPY_DOUBLE];
+    //´return DOUBLE_Descr;
+    //return PyArray_DescrFromType(NPY_DOUBLE);
 }
 
 static NPY_INLINE PyArray_Descr *
