@@ -104,7 +104,7 @@ raw_array_is_aligned(int ndim, npy_intp const *shape,
      *  and all `strides` are 0, as this implies that
      *  (data + n*stride)%alignment == 0 for all integers n.
      */
-
+    printf("raw_array_is_aligned: alignment %d ndim %d\n", alignment, ndim); // fast path for dim=0 and dim=1?
     if (alignment > 1) {
         npy_uintp align_check = (npy_uintp)data;
         int i;

@@ -66,10 +66,8 @@ discover_descriptor_from_pyfloat(
 {
     assert(PyFloat_CheckExact(obj));
     assert (PyArray_DescrFromType(NPY_DOUBLE)==DOUBLE_Descr);
-    Py_INCREF(_builtin_descrs[NPY_DOUBLE]);
-    return _builtin_descrs[NPY_DOUBLE];
-    //´return DOUBLE_Descr;
-    //return PyArray_DescrFromType(NPY_DOUBLE);
+    Py_INCREF(&DOUBLE_Descr);
+    return &DOUBLE_Descr; 
 }
 
 static NPY_INLINE PyArray_Descr *

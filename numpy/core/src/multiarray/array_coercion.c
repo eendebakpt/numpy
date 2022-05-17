@@ -216,6 +216,12 @@ npy_discover_dtype_from_pytype(PyTypeObject *pytype)
         return (PyArray_DTypeMeta *)Py_None;
     }
 
+    //if (pytype==&PyFloat)
+    {
+        // insert fast path to check speedup
+        
+    }
+    // todo: replace with fast lookup for default types, 
     DType = PyDict_GetItem(_global_pytype_to_type_dict, (PyObject *)pytype);
     if (DType == NULL) {
         /* the python type is not known */
