@@ -28,7 +28,20 @@ typedef struct {
     const void* value;
 } item;
 
-int compare( const void* a, const void* b)
+
+
+inline int compare_key( const void* a, const void* b)
+{
+    if (a==b)
+        return 0;
+    if (a<b)
+        return -1;
+    else
+        return 1;
+    
+}
+
+int compare_items( const void* a, const void* b)
 {
     if (((item *)a)->key == ((item *)b)->key)
         return 0;
@@ -39,24 +52,6 @@ int compare( const void* a, const void* b)
 }
 
 
-void insert(item *table,  item elem, size_t * num_items) {
-    
-    table[*num_items]=elem;
-    *num_items=*num_items+1;
-    
-    qsort( table, *num_items, sizeof(item), compare );
-
-}
-
-item* linear_search(item* items, size_t size, const void* key) {
-    for (size_t i=0; i<size; i++) {
-        if (items[i].key==key) {
-            return &items[i];
-        }
-    }
-    return NULL;
-}
-
 item* binary_search(item* items, size_t size, const void* key) {
 
     size_t low = 0;
@@ -64,19 +59,47 @@ item* binary_search(item* items, size_t size, const void* key) {
     while (low < high) {
         
         size_t mid = (low + high) / 2;
-        int c = compare(items[mid].key, key);
-        if (c == 0) {
+        const void * midkey = items[mid].key;
+        //printf("low %lu, high %lu: mid %lu: c %d, key %ld, items[mid].key %ld\n", low, high,mid,c, (long)key, (long)items[mid].key);
+        
+        if (key==midkey) {
             return &items[mid];
         }
-        if (c < 0) {
-            low = mid + 1; // eliminate low half of array
-        } else {
+        if (key < midkey) {
             high = mid;    // eliminate high half of array
+        } else {
+            low = mid + 1; // eliminate low half of array
         }
     }
     // Entire array has been eliminated, key not found.
     return NULL;
 }
+
+void insert(item *table,  item elem, size_t * num_items)
+{
+    table[*num_items]=elem;
+    *num_items=*num_items+1;
+    
+    qsort( table, *num_items, sizeof(item), compare_items );
+    
+    if (0) {
+    printf("insert sort done %ld...\n", (long)*num_items);
+    fflush(0);
+    printf("after insert: (inserted %ld)\n", (long)elem.key);
+    for(size_t j=0; j<*num_items; j++) {
+        printf(" %ld -> %ld\n",  (long)table[j].key, (long)(table[j].value));
+    }
+    if (*num_items>(size_t)6) {
+        printf("huh\n");
+        exit(0);
+    }
+    }
+}
+
+const int MAX_LUT_SIZE=2000;
+
+static size_t num_items=0;
+static item *items =0;
 
 /*
  * This file defines helpers for some of the ctors.c functions which
@@ -233,6 +256,7 @@ _PyArray_MapPyTypeToDType(
     /* Create the global dictionary if it does not exist */
     if (NPY_UNLIKELY(_global_pytype_to_type_dict == NULL)) {
         _global_pytype_to_type_dict = PyDict_New();
+        items = malloc(sizeof(item *)*MAX_LUT_SIZE);
         if (_global_pytype_to_type_dict == NULL) {
             return -1;
         }
@@ -256,10 +280,6 @@ _PyArray_MapPyTypeToDType(
 }
 
 
-const int MAX_LUT_SIZE=2000;
-
-static size_t num_items=0;
-static item *items =0;
     
 /**
  * Lookup the DType for a registered known python scalar type.
@@ -276,9 +296,6 @@ npy_discover_dtype_from_pytype(PyTypeObject *pytype)
         Py_INCREF(Py_None);
         return (PyArray_DTypeMeta *)Py_None;
     }
-
-    if (items==0)
-        items = malloc(sizeof(item *)*MAX_LUT_SIZE);
     
     item* found = binary_search(items, num_items, pytype);
     if (found != NULL) {
@@ -296,7 +313,8 @@ npy_discover_dtype_from_pytype(PyTypeObject *pytype)
     // found new DType, add to fast path
     item elem={(void *)pytype, (void *)DType};
     insert(  (item *)items, elem, &num_items);
-    printf("adding new type: "); PyObject_Print((PyObject *) pytype, stdout, 0); printf("\n");
+    printf("added new type (size of LUT %lu): %ld ", num_items, (long)pytype); PyObject_Print((PyObject *) pytype, stdout, 0); printf("\n");
+    Py_INCREF(DType); // to be safe...
     
     Py_INCREF(DType);
     if (DType == Py_None) {
