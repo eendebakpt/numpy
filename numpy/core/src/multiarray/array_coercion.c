@@ -15,6 +15,7 @@
 #include "common_dtype.h"
 #include "dtypemeta.h"
 
+#include "abstractdtypes.h"
 #include "array_coercion.h"
 #include "ctors.h"
 #include "common.h"
@@ -128,6 +129,8 @@ _prime_global_pytype_to_type_dict(void)
     return 0;
 }
 
+static PyTypeObject *dtype_lookup_pytype = 0;
+static PyObject *dtype_lookup_dtype = 0;
 
 /**
  * Add a new mapping from a python type to the DType class. For a user
@@ -177,6 +180,10 @@ _PyArray_MapPyTypeToDType(
     /* Create the global dictionary if it does not exist */
     if (NPY_UNLIKELY(_global_pytype_to_type_dict == NULL)) {
         _global_pytype_to_type_dict = PyDict_New();
+        dtype_lookup_pytype = &PyFloat_Type;
+        dtype_lookup_dtype = (PyObject*)&PyArray_PyFloatAbstractDType;
+        Py_INCREF(dtype_lookup_pytype); 
+        Py_INCREF(dtype_lookup_dtype); 
         if (_global_pytype_to_type_dict == NULL) {
             return -1;
         }
@@ -199,7 +206,6 @@ _PyArray_MapPyTypeToDType(
             (PyObject *)pytype, Dtype_obj);
 }
 
-
 /**
  * Lookup the DType for a registered known python scalar type.
  *
@@ -215,18 +221,26 @@ npy_discover_dtype_from_pytype(PyTypeObject *pytype)
         Py_INCREF(Py_None);
         return (PyArray_DTypeMeta *)Py_None;
     }
-
-    DType = PyDict_GetItem(_global_pytype_to_type_dict, (PyObject *)pytype);
-    if (DType == NULL) {
-        /* the python type is not known */
-        return NULL;
+    
+    if (dtype_lookup_pytype==pytype) {
+        DType =  dtype_lookup_dtype;
+    }
+    else {
+        DType = PyDict_GetItem(_global_pytype_to_type_dict, (PyObject *)pytype);
+        if (DType == NULL) {
+            /* the python type is not known */
+            return NULL;
+        }
+        
+        // update the single-element LRU cache
+        Py_DECREF(dtype_lookup_pytype); Py_DECREF(dtype_lookup_dtype);
+        dtype_lookup_pytype = pytype;
+        dtype_lookup_dtype = DType;
+        Py_INCREF(dtype_lookup_pytype); Py_INCREF(dtype_lookup_dtype);
     }
 
     Py_INCREF(DType);
-    if (DType == Py_None) {
-        return (PyArray_DTypeMeta *)Py_None;
-    }
-    assert(PyObject_TypeCheck(DType, (PyTypeObject *)&PyArrayDTypeMeta_Type));
+    assert(DType == Py_None || PyObject_TypeCheck(DType, (PyTypeObject *)&PyArrayDTypeMeta_Type));
     return (PyArray_DTypeMeta *)DType;
 }
 
