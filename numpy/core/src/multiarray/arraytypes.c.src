@@ -87,6 +87,10 @@ MyPyFloat_AsDouble(PyObject *obj)
     if (obj == Py_None) {
         return NPY_NAN;
     }
+        
+    if PyFloat_CheckExact(obj)
+       return PyFloat_AsDouble(obj);
+       
     num = PyNumber_Float(obj);
     if (num == NULL) {
         return NPY_NAN;
@@ -138,6 +142,8 @@ static @type@
 MyPyLong_As@Type@ (PyObject *obj)
 {
     @type@ ret;
+    if PyLong_CheckExact(obj)
+       return (@type@)PyLong_AsLong(obj);
     PyObject *num = PyNumber_Long(obj);
 
     if (num == NULL) {
