@@ -21,6 +21,57 @@
 #include "_datetime.h"
 #include "npy_import.h"
 
+// code modified from https://benhoyt.com/writings/hash-table-in-c/
+
+typedef struct {
+    const void* key;
+    const void* value;
+} item;
+
+int compare_items( const void* a, const void* b)
+{
+    if (((item *)a)->key == ((item *)b)->key)
+        return 0;
+    if ( ((item *)a)->key < ((item *)b)->key)
+        return -1;
+    else
+            return 1;
+}
+
+
+item* binary_search(item* items, size_t size, const void* key) {
+    size_t low = 0;
+    size_t high = size;
+    while (low < high) {
+        
+        size_t mid = (low + high) / 2;
+        const void * midkey = items[mid].key;
+        //printf("low %lu, high %lu: mid %lu: c %d, key %ld, items[mid].key %ld\n", low, high,mid,c, (long)key, (long)items[mid].key);
+        
+        if (key==midkey) {
+            return &items[mid];
+        }
+        if (key < midkey) {
+            high = mid;    // eliminate high half of array
+        } else {
+            low = mid + 1; // eliminate low half of array
+        }
+    }
+    return NULL; // key not found
+}
+
+/// Insert element into table and sort again
+void insert(item *table,  item elem, size_t * num_items)
+{
+    table[*num_items]=elem;
+    *num_items=*num_items+1;
+    
+    qsort( table, *num_items, sizeof(item), compare_items );
+}
+
+const int MAX_LUT_SIZE=2000;
+static size_t num_items=0;
+static item *items =0;
 
 /*
  * This file defines helpers for some of the ctors.c functions which
@@ -177,6 +228,7 @@ _PyArray_MapPyTypeToDType(
     /* Create the global dictionary if it does not exist */
     if (NPY_UNLIKELY(_global_pytype_to_type_dict == NULL)) {
         _global_pytype_to_type_dict = PyDict_New();
+        items = malloc(sizeof(item *)*MAX_LUT_SIZE);
         if (_global_pytype_to_type_dict == NULL) {
             return -1;
         }
@@ -200,6 +252,7 @@ _PyArray_MapPyTypeToDType(
 }
 
 
+    
 /**
  * Lookup the DType for a registered known python scalar type.
  *
@@ -208,20 +261,34 @@ _PyArray_MapPyTypeToDType(
  */
 static NPY_INLINE PyArray_DTypeMeta *
 npy_discover_dtype_from_pytype(PyTypeObject *pytype)
-{
+{    
     PyObject *DType;
 
     if (pytype == &PyArray_Type) {
         Py_INCREF(Py_None);
         return (PyArray_DTypeMeta *)Py_None;
     }
-
+    
+    // fast path
+    item* found = binary_search(items, num_items, pytype);
+    if (found != NULL) {
+        DType = (PyObject *)found->value;
+        Py_INCREF(DType);
+        return (PyArray_DTypeMeta *)DType;
+    }
+    
     DType = PyDict_GetItem(_global_pytype_to_type_dict, (PyObject *)pytype);
     if (DType == NULL) {
         /* the python type is not known */
         return NULL;
     }
 
+    // found new DType, add to fast path
+    item elem={(void *)pytype, (void *)DType};
+    insert(  (item *)items, elem, &num_items);
+    printf("added new type (size of LUT %lu): %ld ", num_items, (long)pytype); PyObject_Print((PyObject *) pytype, stdout, 0); printf("\n");
+    Py_INCREF(DType); // to be safe...
+    
     Py_INCREF(DType);
     if (DType == Py_None) {
         return (PyArray_DTypeMeta *)Py_None;
