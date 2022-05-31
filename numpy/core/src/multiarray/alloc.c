@@ -433,11 +433,10 @@ int uo_index=0;   /* user_override index */
 static inline PyDataMem_Handler *
 _PyDataMem_GetHandler_Internal(PyObject *mem_handler)
 {
-#if (!defined(PYPY_VERSION_NUM) || PYPY_VERSION_NUM >= 0x07030600)
     if (mem_handler == PyDataMem_DefaultHandler)
         // fast path for default allocator
         return &default_handler;
-#endif
+
     PyDataMem_Handler *handler = (PyDataMem_Handler *)PyCapsule_GetPointer(
             mem_handler, "mem_handler");
     return handler;
