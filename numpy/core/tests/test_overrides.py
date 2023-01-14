@@ -193,6 +193,8 @@ class TestNDArrayArrayFunction:
             np.concatenate((array, other))
 
         expected = np.concatenate((array, array))
+        # TODO: This looks wrong, array.__array_function__ should reject the
+        #       subclass (the subclass must get a chance).  It should fail!
         result = np.concatenate((array, no_override_sub))
         assert_equal(result, expected.view(NoOverrideSub))
         result = np.concatenate((array, override_sub))

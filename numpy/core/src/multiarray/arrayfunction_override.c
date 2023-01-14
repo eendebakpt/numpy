@@ -1,5 +1,3 @@
-#include "npy_argparse.h"
-#include "pyerrors.h"
 #define NPY_NO_DEPRECATED_API NPY_API_VERSION
 #define _MULTIARRAYMODULE
 
@@ -206,130 +204,68 @@ call_array_function(PyObject* argument, PyObject* method,
 }
 
 
-/**
- * Internal handler for the array-function dispatching. The helper returns
- * either the result, or NotImplemented (as a borrowed reference).
- *
- * @param public_api The public API symbol used for dispatching
- * @param relevant_args Arguments which may implement __array_function__
- * @param args Original arguments
- * @param kwargs Original keyword arguments
- *
- * @returns The result of the dispatched version, or a borrowed reference
- *          to NotImplemented to indicate the default implementation should
- *          be used.
+
+/*
+ * Helper to convert from vectorcall convention, since the protocol requires
+ * args and kwargs to be passed as tuple and dict explicitly.
+ * We always pass a dict, so always returns it.
  */
-static PyObject *
-array_implement_array_function_internal(
-    PyObject *public_api, PyObject *relevant_args,
-    PyObject *args, PyObject *kwargs)
+static int
+get_args_and_kwargs(
+        PyObject *const *fast_args, Py_ssize_t len_args, PyObject *kwnames,
+        PyObject **out_args, PyObject **out_kwargs)
 {
-    PyObject *implementing_args[NPY_MAXARGS];
-    PyObject *array_function_methods[NPY_MAXARGS];
-    PyObject *types = NULL;
+    len_args = PyVectorcall_NARGS(len_args);
+    PyObject *args = PyTuple_New(len_args);
+    PyObject *kwargs = NULL;
 
-    PyObject *result = NULL;
+    if (args == NULL) {
+        return -1;
+    }
+    for (Py_ssize_t i = 0; i < len_args; i++) {
+        Py_INCREF(fast_args[i]);
+        PyTuple_SET_ITEM(args, i, fast_args[i]);
+    }
+    kwargs = PyDict_New();
+    if (kwnames != NULL) {
+        if (kwargs == NULL) {
+            Py_DECREF(args);
+            return -1;
+        }
+        Py_ssize_t nkwargs = PyTuple_GET_SIZE(kwnames);
+        for (Py_ssize_t i = 0; i < nkwargs; i++) {
+            PyObject *key = PyTuple_GET_ITEM(kwnames, i);
+            PyObject *value = fast_args[i+len_args];
+            if (PyDict_SetItem(kwargs, key, value) < 0) {
+                Py_DECREF(args);
+                Py_DECREF(kwargs);
+                return -1;
+            }
+        }
+    }
+    *out_args = args;
+    *out_kwargs = kwargs;
+    return 0;
+}
 
+
+static void
+set_no_matching_types_error(PyObject *public_api, PyObject *types)
+{
     static PyObject *errmsg_formatter = NULL;
-
-    relevant_args = PySequence_Fast(
-        relevant_args,
-        "dispatcher for __array_function__ did not return an iterable");
-    if (relevant_args == NULL) {
-        return NULL;
-    }
-
-    /* Collect __array_function__ implementations */
-    int num_implementing_args = get_implementing_args_and_methods(
-        relevant_args, implementing_args, array_function_methods);
-    if (num_implementing_args == -1) {
-        goto cleanup;
-    }
-
-    /*
-     * Handle the typical case of no overrides. This is merely an optimization
-     * if some arguments are ndarray objects, but is also necessary if no
-     * arguments implement __array_function__ at all (e.g., if they are all
-     * built-in types).
-     */
-    int any_overrides = 0;
-    for (int j = 0; j < num_implementing_args; j++) {
-        if (!is_default_array_function(array_function_methods[j])) {
-            any_overrides = 1;
-            break;
-        }
-    }
-    if (!any_overrides) {
-        /*
-         * When the default implementation should be called, return
-         * `Py_NotImplemented` to indicate this.
-         */
-        result = Py_NotImplemented;
-        goto cleanup;
-    }
-
-    /*
-     * Create a Python object for types.
-     * We use a tuple, because it's the fastest Python collection to create
-     * and has the bonus of being immutable.
-     */
-    types = PyTuple_New(num_implementing_args);
-    if (types == NULL) {
-        goto cleanup;
-    }
-    for (int j = 0; j < num_implementing_args; j++) {
-        PyObject *arg_type = (PyObject *)Py_TYPE(implementing_args[j]);
-        Py_INCREF(arg_type);
-        PyTuple_SET_ITEM(types, j, arg_type);
-    }
-
-    /* Call __array_function__ methods */
-    for (int j = 0; j < num_implementing_args; j++) {
-        PyObject *argument = implementing_args[j];
-        PyObject *method = array_function_methods[j];
-
-        /*
-         * We use `public_api` instead of `implementation` here so
-         * __array_function__ implementations can do equality/identity
-         * comparisons.
-         */
-        result = call_array_function(
-            argument, method, public_api, types, args, kwargs);
-
-        if (result == Py_NotImplemented) {
-            /* Try the next one */
-            Py_DECREF(result);
-            result = NULL;
-        }
-        else {
-            /* Either a good result, or an exception was raised. */
-            goto cleanup;
-        }
-    }
-
     /* No acceptable override found, raise TypeError. */
     npy_cache_import("numpy.core._internal",
                      "array_function_errmsg_formatter",
                      &errmsg_formatter);
     if (errmsg_formatter != NULL) {
         PyObject *errmsg = PyObject_CallFunctionObjArgs(
-            errmsg_formatter, public_api, types, NULL);
+                errmsg_formatter, public_api, types, NULL);
         if (errmsg != NULL) {
             PyErr_SetObject(PyExc_TypeError, errmsg);
             Py_DECREF(errmsg);
         }
     }
-
-cleanup:
-    for (int j = 0; j < num_implementing_args; j++) {
-        Py_DECREF(implementing_args[j]);
-        Py_DECREF(array_function_methods[j]);
-    }
-    Py_XDECREF(types);
-    Py_DECREF(relevant_args);
-    return result;
 }
-
 
 /*
  * Implements the __array_function__ protocol for C array creation functions
@@ -344,64 +280,48 @@ array_implement_c_array_function_creation(
     PyObject *args, PyObject *kwargs,
     PyObject *const *fast_args, Py_ssize_t len_args, PyObject *kwnames)
 {
-    PyObject *relevant_args = NULL;
+    PyObject *dispatch_types = NULL;
     PyObject *numpy_module = NULL;
     PyObject *public_api = NULL;
     PyObject *result = NULL;
 
     /* If `like` doesn't implement `__array_function__`, raise a `TypeError` */
-    PyObject *tmp_has_override = get_array_function(like);
-    if (tmp_has_override == NULL) {
+    PyObject *method = get_array_function(like);
+    if (method == NULL) {
         return PyErr_Format(PyExc_TypeError,
                 "The `like` argument must be an array-like that "
                 "implements the `__array_function__` protocol.");
     }
-    Py_DECREF(tmp_has_override);
-
-    if (fast_args != NULL) {
+    if (is_default_array_function(method)) {
         /*
-         * Convert from vectorcall convention, since the protocol requires
-         * the normal convention.  We have to do this late to ensure the
-         * normal path where NotImplemented is returned is fast.
+         * Return a borrowed reference of Py_NotImplemented to defer back to
+         * the original function.
          */
-        assert(args == NULL);
-        assert(kwargs == NULL);
-        args = PyTuple_New(len_args);
-        if (args == NULL) {
-            return NULL;
-        }
-        for (Py_ssize_t i = 0; i < len_args; i++) {
-            Py_INCREF(fast_args[i]);
-            PyTuple_SET_ITEM(args, i, fast_args[i]);
-        }
-        if (kwnames != NULL) {
-            kwargs = PyDict_New();
-            if (kwargs == NULL) {
-                Py_DECREF(args);
-                return NULL;
-            }
-            Py_ssize_t nkwargs = PyTuple_GET_SIZE(kwnames);
-            for (Py_ssize_t i = 0; i < nkwargs; i++) {
-                PyObject *key = PyTuple_GET_ITEM(kwnames, i);
-                PyObject *value = fast_args[i+len_args];
-                if (PyDict_SetItem(kwargs, key, value) < 0) {
-                    Py_DECREF(args);
-                    Py_DECREF(kwargs);
-                    return NULL;
-                }
-            }
-        }
+        Py_DECREF(method);
+        return Py_NotImplemented;
     }
 
-    relevant_args = PyTuple_Pack(1, like);
-    if (relevant_args == NULL) {
+    dispatch_types = PyTuple_Pack(1, Py_TYPE(like));
+    if (dispatch_types == NULL) {
         goto finish;
     }
+
+    /* We have to call __array_function__ properly, which needs some prep */
+    if (fast_args != NULL) {
+        assert(args == NULL);
+        assert(kwargs == NULL);
+        if (get_args_and_kwargs(
+                fast_args, len_args, kwnames, &args, &kwargs) < 0) {
+            goto finish;
+        }
+    }
+
     /* The like argument must be present in the keyword arguments, remove it */
     if (PyDict_DelItem(kwargs, npy_ma_str_like) < 0) {
         goto finish;
     }
 
+    /* Fetch the actual symbol (the long way right now) */
     numpy_module = PyImport_Import(npy_ma_str_numpy);
     if (numpy_module == NULL) {
         goto finish;
@@ -418,16 +338,20 @@ array_implement_c_array_function_creation(
         goto finish;
     }
 
-    result = array_implement_array_function_internal(
-            public_api, relevant_args, args, kwargs);
+    result = call_array_function(like, method,
+            public_api, dispatch_types, args, kwargs);
+
+    if (result == Py_NotImplemented) {
+        Py_DECREF(result);
+        result = NULL;
+        set_no_matching_types_error(public_api, dispatch_types);
+    }
 
   finish:
-    if (kwnames != NULL) {
-        /* args and kwargs were converted from vectorcall convention */
-        Py_XDECREF(args);
-        Py_XDECREF(kwargs);
-    }
-    Py_XDECREF(relevant_args);
+    Py_DECREF(method);
+    Py_XDECREF(args);
+    Py_XDECREF(kwargs);
+    Py_XDECREF(dispatch_types);
     Py_XDECREF(public_api);
     return result;
 }
@@ -509,8 +433,13 @@ dispatcher_vectorcall(PyArray_ArrayFunctionDispatcherObject *self,
 {
     PyObject *result = NULL;
     PyObject *types = NULL;
-    PyObject *args_kwargs = NULL;
     PyObject *relevant_args = NULL;
+
+    PyObject *public_api;
+
+    /* __array_function__ passes args, kwargs.  These may be filled: */
+    PyObject *packed_args = NULL;
+    PyObject *packed_kwargs = NULL;
 
     PyObject *implementing_args[NPY_MAXARGS];
     PyObject *array_function_methods[NPY_MAXARGS];
@@ -518,9 +447,11 @@ dispatcher_vectorcall(PyArray_ArrayFunctionDispatcherObject *self,
     int num_implementing_args;
 
     if (self->relevant_arg_func != NULL) {
+        public_api = (PyObject *)self;
+
         /* Typical path, need to call the relevant_arg_func and unpack them */
-        relevant_args = PyObject_Vectorcall(self->relevant_arg_func,
-                args, PyVectorcall_NARGS(len_args), kwnames);
+        relevant_args = PyObject_Vectorcall(
+                self->relevant_arg_func, args, len_args, kwnames);
         if (relevant_args == NULL) {
             return NULL;
         }
@@ -538,10 +469,12 @@ dispatcher_vectorcall(PyArray_ArrayFunctionDispatcherObject *self,
         }
     }
     else {
+        /* For like= dispatching from Python, the public_symbol is the impl */
+        public_api = self->default_impl;
+
         /*
-         * We are dealing with `like=` from Python.  For simplicity, we moved
-         * the `like=` argument to be passed as the first argument, this allows
-         * to trivially mutate everything here.
+         * We are dealing with `like=` from Python.  For simplicity, the
+         * Python code passes it on as the first argument.
          */
         if (PyVectorcall_NARGS(len_args) == 0) {
             PyErr_Format(PyExc_TypeError,
@@ -566,7 +499,6 @@ dispatcher_vectorcall(PyArray_ArrayFunctionDispatcherObject *self,
         args++;
     }
 
-
     /*
      * Handle the typical case of no overrides. This is merely an optimization
      * if some arguments are ndarray objects, but is also necessary if no
@@ -581,40 +513,17 @@ dispatcher_vectorcall(PyArray_ArrayFunctionDispatcherObject *self,
         }
     }
     if (!any_overrides) {
-        /*
-         * When the default implementation should be called, return
-         * `Py_NotImplemented` to indicate this.
-         */
+        /* Directly call the actual implementation. */
         result = PyObject_Vectorcall(self->default_impl, args, len_args, kwnames);
         goto cleanup;
     }
 
-    /* we can always use the same one, it is just a hack: */
-    static PyObject *argpacker = NULL;
-    if (argpacker == NULL) {
-        argpacker = PyObject_GetAttrString(
-                (PyObject *)self, "_pack__array_function__");
-        if (argpacker == NULL) {
-            goto cleanup;
-        }
-    }
-    args_kwargs = PyObject_Vectorcall(argpacker,
-            args, len_args, kwnames);
-    if (args_kwargs == NULL) {
+    /* Find args and kwargs as tuple and dict, as we pass them out: */
+    if (get_args_and_kwargs(
+            args, len_args, kwnames, &packed_args, &packed_kwargs) < 0) {
         goto cleanup;
     }
-    if (!PyTuple_CheckExact(args_kwargs)
-            || PyTuple_GET_SIZE(args_kwargs) != 2
-            || !PyTuple_CheckExact(PyTuple_GET_ITEM(args_kwargs, 0))
-            || !PyDict_CheckExact(PyTuple_GET_ITEM(args_kwargs, 1))) {
-        PyErr_SetString(PyExc_RuntimeError,
-                "internal numpy array during dispatching, packing args "
-                "failed.");
-        goto cleanup;
-    }
-    PyObject *packed_args = PyTuple_GET_ITEM(args_kwargs, 0);
-    PyObject *packed_kwargs = NULL;
-    packed_kwargs = PyTuple_GET_ITEM(args_kwargs, 1);
+
     /*
      * Create a Python object for types.
      * We use a tuple, because it's the fastest Python collection to create
@@ -635,24 +544,8 @@ dispatcher_vectorcall(PyArray_ArrayFunctionDispatcherObject *self,
         PyObject *argument = implementing_args[j];
         PyObject *method = array_function_methods[j];
 
-        if (is_default_array_function(method)) {
-            /* Will not accept any other types */
-            continue;
-        }
-
-        /*
-         * What the public API is depends on whether we are in `like=` mode
-         * or not.
-         */
-        PyObject *public_api;
-        if (self->relevant_arg_func != NULL) {
-            public_api = (PyObject *)self;
-        }
-        else {
-            public_api = self->default_impl;
-        }
         result = call_array_function(
-                method, argument, public_api, types,
+                argument, method, public_api, types,
                 packed_args, packed_kwargs);
 
         if (result == Py_NotImplemented) {
@@ -666,26 +559,15 @@ dispatcher_vectorcall(PyArray_ArrayFunctionDispatcherObject *self,
         }
     }
 
-    static PyObject *errmsg_formatter = NULL;
-    /* No acceptable override found, raise TypeError. */
-    npy_cache_import("numpy.core._internal",
-                     "array_function_errmsg_formatter",
-                     &errmsg_formatter);
-    if (errmsg_formatter != NULL) {
-        PyObject *errmsg = PyObject_CallFunctionObjArgs(
-                errmsg_formatter, self, types, NULL);
-        if (errmsg != NULL) {
-            PyErr_SetObject(PyExc_TypeError, errmsg);
-            Py_DECREF(errmsg);
-        }
-    }
+    set_no_matching_types_error(public_api, types);
 
 cleanup:
     for (int j = 0; j < num_implementing_args; j++) {
         Py_DECREF(implementing_args[j]);
         Py_DECREF(array_function_methods[j]);
     }
-    Py_XDECREF(args_kwargs);
+    Py_XDECREF(packed_args);
+    Py_XDECREF(packed_kwargs);
     Py_XDECREF(types);
     Py_XDECREF(relevant_args);
     return result;
@@ -738,11 +620,16 @@ dispatcher_str(PyArray_ArrayFunctionDispatcherObject *self)
     return PyObject_Str(self->default_impl);
 }
 
+
 static PyObject *
-dispatcher_repr(PyArray_ArrayFunctionDispatcherObject *self)
+dispatcher_repr(PyObject *self)
 {
-        // TODO: Should print own address when using `like=`
-        return PyObject_Repr(self->default_impl);
+    PyObject *name = PyObject_GetAttrString(self, "__name__");
+    if (name == NULL) {
+        return NULL;
+    }
+    /* Print like a normal function */
+    return PyUnicode_FromFormat("<function %S at %p>", name, self);
 }
 
 static PyObject *
@@ -753,26 +640,17 @@ dispatcher_get_implementation(
     return self->default_impl;
 }
 
+
 static PyObject *
-pack__array_function__(PyObject *NPY_UNUSED(self),
-        PyObject *args, PyObject **kwargs)
+dispatcher_reduce(PyObject *self, PyObject *NPY_UNUSED(args))
 {
-    if (kwargs == NULL) {
-        PyObject *dict = PyDict_New();
-        if (dict == NULL) {
-            return NULL;
-        }
-        return PyTuple_Pack(2, args, dict);
-    }
-    return PyTuple_Pack(2, args, kwargs);
+    return PyObject_GetAttrString(self, "__qualname__");
 }
 
 
 static struct PyMethodDef func_dispatcher_methods[] = {
-    // TODO: Fix that silly way?! :), the like= path already has unpacking code
-    {"_pack__array_function__",  /* silly way to help with packing args */
-     (PyCFunction)pack__array_function__,
-     METH_VARARGS | METH_KEYWORDS, NULL},
+    {"__reduce__",
+        (PyCFunction)dispatcher_reduce, METH_NOARGS, NULL},
     {NULL, NULL, 0, NULL}
 };
 
@@ -788,7 +666,7 @@ NPY_NO_EXPORT PyTypeObject PyArrayFunctionDispatcher_Type = {
      PyVarObject_HEAD_INIT(NULL, 0)
      .tp_name = "numpy._ArrayFunctionDispatcher",
      .tp_basicsize = sizeof(PyArray_ArrayFunctionDispatcherObject),
-     // TODO: Got a dict, so should maybe also have traverse...
+     /* We have a dict, so in theory could traverse, but in practice... */
      .tp_dictoffset = offsetof(PyArray_ArrayFunctionDispatcherObject, dict),
      .tp_dealloc = (destructor)dispatcher_dealloc,
      .tp_new = (newfunc)dispatcher_new,
