@@ -1,3 +1,5 @@
+#include "npy_argparse.h"
+#include "pyerrors.h"
 #define NPY_NO_DEPRECATED_API NPY_API_VERSION
 #define _MULTIARRAYMODULE
 
@@ -330,60 +332,6 @@ cleanup:
 
 
 /*
- * Implements the __array_function__ protocol for a Python function, as described in
- * in NEP-18. See numpy.core.overrides for a full docstring.
- */
-NPY_NO_EXPORT PyObject *
-array_implement_array_function(
-    PyObject *NPY_UNUSED(dummy), PyObject *positional_args)
-{
-    PyObject *res, *implementation, *public_api, *relevant_args, *args, *kwargs;
-
-    if (!PyArg_UnpackTuple(
-            positional_args, "implement_array_function", 5, 5,
-            &implementation, &public_api, &relevant_args, &args, &kwargs)) {
-        return NULL;
-    }
-
-    /*
-     * Remove `like=` kwarg, which is NumPy-exclusive and thus not present
-     * in downstream libraries. If `like=` is specified but doesn't
-     * implement `__array_function__`, raise a `TypeError`.
-     */
-    if (kwargs != NULL && PyDict_Contains(kwargs, npy_ma_str_like)) {
-        PyObject *like_arg = PyDict_GetItem(kwargs, npy_ma_str_like);
-        if (like_arg != NULL) {
-            PyObject *tmp_has_override = get_array_function(like_arg);
-            if (tmp_has_override == NULL) {
-                return PyErr_Format(PyExc_TypeError,
-                        "The `like` argument must be an array-like that "
-                        "implements the `__array_function__` protocol.");
-            }
-            Py_DECREF(tmp_has_override);
-            PyDict_DelItem(kwargs, npy_ma_str_like);
-
-            /*
-             * If `like=` kwarg was removed, `implementation` points to the NumPy
-             * public API, as `public_api` is in that case the wrapper dispatcher
-             * function. For example, in the `np.full` case, `implementation` is
-             * `np.full`, whereas `public_api` is `_full_with_like`. This is done
-             * to ensure `__array_function__` implementations can do
-             * equality/identity comparisons when `like=` is present.
-             */
-            public_api = implementation;
-        }
-    }
-
-    res = array_implement_array_function_internal(
-        public_api, relevant_args, args, kwargs);
-
-    if (res == Py_NotImplemented) {
-        return PyObject_Call(implementation, args, kwargs);
-    }
-    return res;
-}
-
-/*
  * Implements the __array_function__ protocol for C array creation functions
  * only. Added as an extension to NEP-18 in an effort to bring NEP-35 to
  * life with minimal dispatch overhead.
@@ -562,27 +510,62 @@ dispatcher_vectorcall(PyArray_ArrayFunctionDispatcherObject *self,
     PyObject *result = NULL;
     PyObject *types = NULL;
     PyObject *args_kwargs = NULL;
-
-    PyObject *relevant_args = PyObject_Vectorcall(self->relevant_arg_func,
-            args, PyVectorcall_NARGS(len_args), kwnames);
-    if (relevant_args == NULL) {
-        return NULL;
-    }
-    Py_SETREF(relevant_args, PySequence_Fast(relevant_args,
-            "dispatcher for __array_function__ did not return an iterable"));
-    if (relevant_args == NULL) {
-        return NULL;
-    }
+    PyObject *relevant_args = NULL;
 
     PyObject *implementing_args[NPY_MAXARGS];
     PyObject *array_function_methods[NPY_MAXARGS];
 
-    int num_implementing_args = get_implementing_args_and_methods(
-            relevant_args, implementing_args, array_function_methods);
-    if (num_implementing_args < 0) {
-        Py_DECREF(relevant_args);
-        return NULL;
+    int num_implementing_args;
+
+    if (self->relevant_arg_func != NULL) {
+        /* Typical path, need to call the relevant_arg_func and unpack them */
+        relevant_args = PyObject_Vectorcall(self->relevant_arg_func,
+                args, PyVectorcall_NARGS(len_args), kwnames);
+        if (relevant_args == NULL) {
+            return NULL;
+        }
+        Py_SETREF(relevant_args, PySequence_Fast(relevant_args,
+                "dispatcher for __array_function__ did not return an iterable"));
+        if (relevant_args == NULL) {
+            return NULL;
+        }
+
+        num_implementing_args = get_implementing_args_and_methods(
+                relevant_args, implementing_args, array_function_methods);
+        if (num_implementing_args < 0) {
+            Py_DECREF(relevant_args);
+            return NULL;
+        }
     }
+    else {
+        /*
+         * We are dealing with `like=` from Python.  For simplicity, we moved
+         * the `like=` argument to be passed as the first argument, this allows
+         * to trivially mutate everything here.
+         */
+        if (PyVectorcall_NARGS(len_args) == 0) {
+            PyErr_Format(PyExc_TypeError,
+                    "`like` argument dispatching, but first argument is not "
+                    "positional in call to %S.", self->default_impl);
+            return NULL;
+        }
+
+        array_function_methods[0] = get_array_function(args[0]);
+        if (array_function_methods[0] == NULL) {
+            return PyErr_Format(PyExc_TypeError,
+                    "The `like` argument must be an array-like that "
+                    "implements the `__array_function__` protocol.");
+        }
+        num_implementing_args = 1;
+        implementing_args[0] = args[0];
+        Py_INCREF(implementing_args[0]);
+
+        /* do not pass the like argument */
+        len_args = PyVectorcall_NARGS(len_args) - 1;
+        len_args |= PY_VECTORCALL_ARGUMENTS_OFFSET;
+        args++;
+    }
+
 
     /*
      * Handle the typical case of no overrides. This is merely an optimization
@@ -652,20 +635,25 @@ dispatcher_vectorcall(PyArray_ArrayFunctionDispatcherObject *self,
         PyObject *argument = implementing_args[j];
         PyObject *method = array_function_methods[j];
 
-        /*
-         * We use `public_api` instead of `implementation` here so
-         * __array_function__ implementations can do equality/identity
-         * comparisons.
-         */
         if (is_default_array_function(method)) {
-            result = PyObject_Vectorcall(
-                    self->default_impl, args, len_args, kwnames);
+            /* Will not accept any other types */
+            continue;
+        }
+
+        /*
+         * What the public API is depends on whether we are in `like=` mode
+         * or not.
+         */
+        PyObject *public_api;
+        if (self->relevant_arg_func != NULL) {
+            public_api = (PyObject *)self;
         }
         else {
-            result = PyObject_CallFunctionObjArgs(
-                    method, argument, self, types, packed_args, packed_kwargs,
-                    NULL);
+            public_api = self->default_impl;
         }
+        result = call_array_function(
+                method, argument, public_api, types,
+                packed_args, packed_kwargs);
 
         if (result == Py_NotImplemented) {
             /* Try the next one */
@@ -699,7 +687,7 @@ cleanup:
     }
     Py_XDECREF(args_kwargs);
     Py_XDECREF(types);
-    Py_DECREF(relevant_args);
+    Py_XDECREF(relevant_args);
     return result;
 }
 
@@ -709,26 +697,35 @@ dispatcher_new(PyTypeObject *NPY_UNUSED(cls), PyObject *args, PyObject *kwargs)
 {
     PyArray_ArrayFunctionDispatcherObject *self;
 
-    if (kwargs != NULL || PyTuple_GET_SIZE(args) != 2) {
-        PyErr_SetString(PyExc_TypeError,
-                "must pass exactly two arguments and no kwargs.");
-        return NULL;
-    }
-
     self = PyObject_New(
             PyArray_ArrayFunctionDispatcherObject,
             &PyArrayFunctionDispatcher_Type);
     if (self == NULL) {
+        return PyErr_NoMemory();
+    }
+
+    char *kwlist[] = {"", "", NULL};
+    if (!PyArg_ParseTupleAndKeywords(
+            args, kwargs, "OO:_ArrayFunctionDispatcher", kwlist,
+            &self->relevant_arg_func, &self->default_impl)) {
+        Py_DECREF(self);
         return NULL;
     }
-    self->vectorcall = (vectorcallfunc )dispatcher_vectorcall;
-    self->relevant_arg_func = PyTuple_GetItem(args, 0);
-    Py_INCREF(self->relevant_arg_func);
-    self->default_impl = PyTuple_GetItem(args, 1);
+
+    self->vectorcall = (vectorcallfunc)dispatcher_vectorcall;
+    if (self->relevant_arg_func == Py_None) {
+        /* NULL in the relevant arg function means we use `like=` */
+        Py_CLEAR(self->relevant_arg_func);
+    }
+    else {
+        Py_INCREF(self->relevant_arg_func);
+    }
     Py_INCREF(self->default_impl);
+
+    /* Need to be like a Python function that has arbitrary attributes */
     self->dict = PyDict_New();
     if (self->dict == NULL) {
-        PyObject_FREE(self);
+        Py_DECREF(self);
         return NULL;
     }
     return (PyObject *)self;
@@ -736,9 +733,16 @@ dispatcher_new(PyTypeObject *NPY_UNUSED(cls), PyObject *args, PyObject *kwargs)
 
 
 static PyObject *
+dispatcher_str(PyArray_ArrayFunctionDispatcherObject *self)
+{
+    return PyObject_Str(self->default_impl);
+}
+
+static PyObject *
 dispatcher_repr(PyArray_ArrayFunctionDispatcherObject *self)
 {
-    return PyObject_Repr(self->default_impl);
+        // TODO: Should print own address when using `like=`
+        return PyObject_Repr(self->default_impl);
 }
 
 static PyObject *
@@ -772,11 +776,13 @@ static struct PyMethodDef func_dispatcher_methods[] = {
     {NULL, NULL, 0, NULL}
 };
 
+
 static struct PyGetSetDef func_dispatcher_getset[] = {
     {"__dict__", &PyObject_GenericGetDict, 0, NULL, 0},
     {"_implementation", (getter)&dispatcher_get_implementation, 0, NULL, 0},
     {0, 0, 0, 0, 0}
 };
+
 
 NPY_NO_EXPORT PyTypeObject PyArrayFunctionDispatcher_Type = {
      PyVarObject_HEAD_INIT(NULL, 0)
@@ -786,6 +792,7 @@ NPY_NO_EXPORT PyTypeObject PyArrayFunctionDispatcher_Type = {
      .tp_dictoffset = offsetof(PyArray_ArrayFunctionDispatcherObject, dict),
      .tp_dealloc = (destructor)dispatcher_dealloc,
      .tp_new = (newfunc)dispatcher_new,
+     .tp_str = (reprfunc)dispatcher_str,
      .tp_repr = (reprfunc)dispatcher_repr,
      .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_HAVE_VECTORCALL,
      .tp_methods = func_dispatcher_methods,

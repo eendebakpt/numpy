@@ -6,8 +6,7 @@ import os
 from .._utils import set_module
 from .._utils._inspect import getargspec
 from numpy.core._multiarray_umath import (
-    add_docstring, implement_array_function, _get_implementing_args,
-    _ArrayFunctionDispatcher)
+    add_docstring,  _get_implementing_args, _ArrayFunctionDispatcher)
 
 
 ARRAY_FUNCTIONS = set()
@@ -34,9 +33,11 @@ def set_array_function_like_doc(public_api):
 
 
 add_docstring(
-    implement_array_function,
+    _ArrayFunctionDispatcher,
     """
     Implement a function with checks for __array_function__ overrides.
+
+    TODO: Update docstring!
 
     All arguments are required, and can only be passed by position.
 
@@ -67,7 +68,7 @@ add_docstring(
     """)
 
 
-# exposed for testing purposes; used internally by implement_array_function
+# exposed for testing purposes; used internally by _ArrayFunctionDispatcher
 add_docstring(
     _get_implementing_args,
     """
@@ -111,7 +112,7 @@ def verify_matching_signatures(implementation, dispatcher):
                                'default argument values')
 
 
-def array_function_dispatch(dispatcher, module=None, verify=True,
+def array_function_dispatch(dispatcher=None, module=None, verify=True,
                             docs_from_dispatcher=False):
     """Decorator for adding dispatch with the __array_function__ protocol.
 
@@ -119,10 +120,14 @@ def array_function_dispatch(dispatcher, module=None, verify=True,
 
     Parameters
     ----------
-    dispatcher : callable
+    dispatcher : callable or None
         Function that when called like ``dispatcher(*args, **kwargs)`` with
         arguments from the NumPy function call returns an iterable of
         array-like arguments to check for ``__array_function__``.
+
+        If `None`, the first argument is used as the single `like=` argument
+        and not passed on.  A function implementing `like=` must call its
+        dispatcher with `like` as the first non-keyword argument.
     module : str, optional
         __module__ attribute to set on new function, e.g., ``module='numpy'``.
         By default, module is copied from the decorated function.
@@ -155,13 +160,25 @@ def array_function_dispatch(dispatcher, module=None, verify=True,
 
     def decorator(implementation):
         if verify:
-            verify_matching_signatures(implementation, dispatcher)
+            if dispatcher is not None:
+                verify_matching_signatures(implementation, dispatcher)
+            else:
+                # Using __code__ directly similar to verify_matching_signature
+                co = implementation.__code__
+                last_arg = co.co_argcount + co.co_kwonlyargcount - 1
+                last_arg = co.co_varnames[last_arg]
+                if last_arg != "like" or co.co_kwonlyargcount == 0:
+                    raise RuntimeError(
+                        "__array_function__ expects `like=` to be the last "
+                        "argument and a keyword-only argument. "
+                        f"{implementation} does not seem to comply.")
 
         if docs_from_dispatcher:
             add_docstring(implementation, dispatcher.__doc__)
 
         public_api = _ArrayFunctionDispatcher(dispatcher, implementation)
         public_api = functools.wraps(implementation)(public_api)
+
         if module is not None:
             public_api.__module__ = module
 
