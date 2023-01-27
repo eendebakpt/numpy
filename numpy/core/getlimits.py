@@ -365,6 +365,19 @@ def _discovered_machar(ftype):
                   params['title'])
 
 
+@lru_cache
+def _finfo_from_dtype(cls, dtype):
+    # we have a dtype object, convert it to the equivalent scalar dtype
+    dtype = numeric.obj2sctype(dtype)
+    if not issubclass(dtype, numeric.inexact):
+        raise ValueError("data type %r not inexact" % (dtype))
+
+    if not issubclass(dtype, numeric.floating):
+        dtype = _convert_complex_to_real_float[dtype]
+
+    obj = object.__new__(cls)._init(dtype)
+    return obj
+
 @set_module('numpy')
 class finfo:
     """
@@ -471,9 +484,8 @@ class finfo:
 
     _finfo_cache = {}
 
-    @lru_cache
-    def __new__(cls, dtype):
-
+       
+    def __new__(cls, dtype):            
         if dtype is None:
             # Deprecated in NumPy 1.25, 2023-01-16
             warnings.warn(
@@ -488,19 +500,8 @@ class finfo:
         except TypeError:
             # In case a float instance was given
             dtype = numeric.dtype(type(dtype))
-            # changed type, so we can recursively call finfo
-            return finfo(dtype)
 
-        # we have a dtype object, convert it to the equivalent scalar dtype
-        dtype = numeric.obj2sctype(dtype)
-        if not issubclass(dtype, numeric.inexact):
-            raise ValueError("data type %r not inexact" % (dtype))
-
-        if not issubclass(dtype, numeric.floating):
-            dtype = _convert_complex_to_real_float[dtype]
-
-        obj = object.__new__(cls)._init(dtype)
-        return obj
+        return _finfo_from_dtype(cls, dtype)
 
     def _init(self, dtype):
         self.dtype = numeric.dtype(dtype)
