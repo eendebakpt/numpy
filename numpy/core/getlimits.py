@@ -377,6 +377,7 @@ def _finfo_from_dtype(cls, dtype):
 
     obj = object.__new__(cls)._init(dtype)
     return obj
+dtype_class = numeric.dtype
 
 @set_module('numpy')
 class finfo:
@@ -481,11 +482,11 @@ class finfo:
     dtype('float32')
 
     """
-
-    _finfo_cache = {}
-
        
     def __new__(cls, dtype):            
+        if isinstance(dtype, dtype_class): # common case
+            return _finfo_from_dtype(cls, dtype)
+
         if dtype is None:
             # Deprecated in NumPy 1.25, 2023-01-16
             warnings.warn(
