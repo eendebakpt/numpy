@@ -5033,6 +5033,69 @@ ufunc_generic_vectorcall(PyObject *ufunc,
             args, PyVectorcall_NARGS(len_args), kwnames, NPY_FALSE);
 }
 
+const char *
+err_string(int x)
+{
+    switch (x) {
+    case ERR_IGNORE:
+            return "ignore";
+    case ERR_WARN:
+        return "warn";
+    case ERR_RAISE:
+        return "raise";
+    case ERR_CALL:
+        return "call";
+    case ERR_PRINT:
+        return "print";
+    case ERR_LOG:
+        return "log";
+    default:
+        return NULL;
+    }
+}
+
+NPY_NO_EXPORT PyObject *
+ufunc_geterr_dictionary(PyObject *NPY_UNUSED(dummy), PyObject *(arg))
+{
+    PyLongObject *l = ufunc_geterr(NULL, NULL);
+    if (l == NULL)
+        return NULL;
+
+
+    const int mask = 7;
+    long val;
+    int ret;
+    PySize_t maskvalue = PyInt_AsLong(arg);
+    if ((maskvalue == -1) && PyErrOccured())
+        return NULL;
+    
+    result = PyDict_New();
+    if (result == NULL) {
+        return NULL;
+    }
+    val = (maskvalue >> SHIFT_DIVIDEBYZERO) & mask;
+    if (PyDict_SetItemString(result , "divide", err_string(val))) {
+        Py_DECREF(result);
+        return NULL;
+    }
+    val = (maskvalue >> SHIFT_OVERFLOW) & mask;
+    if (PyDict_SetItemString(result, "over", err_string(val))) {
+        Py_DECREF(result);
+        return NULL;
+    }
+    val = (maskvalue >> SHIFT_UNDERFLOW) & mask;
+    if (PyDict_SetItemString(result, "under", err_string(val))) {
+        Py_DECREF(result);
+        return NULL;
+    }
+    val = (maskvalue >> SHIFT_INVALID) & mask;
+    if (PyDict_SetItemString(result, "invalid", err_string(val))) {
+        Py_DECREF(result);
+        return NULL;
+    }
+
+    return res;
+}
 
 NPY_NO_EXPORT PyObject *
 ufunc_geterr(PyObject *NPY_UNUSED(dummy), PyObject *NPY_UNUSED(arg))

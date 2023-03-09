@@ -167,6 +167,8 @@ def geterr():
     """
     maskvalue = umath.geterrobj()[1]
     mask = 7
+
+
     res = {}
     val = (maskvalue >> SHIFT_DIVIDEBYZERO) & mask
     res['divide'] = _errdict_rev[val]
