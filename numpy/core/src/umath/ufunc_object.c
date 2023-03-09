@@ -5033,22 +5033,29 @@ ufunc_generic_vectorcall(PyObject *ufunc,
             args, PyVectorcall_NARGS(len_args), kwnames, NPY_FALSE);
 }
 
-const char *
+//static  PyObject *ignore_str = PyUnicode_InternFromString("ignore");
+//static  PyObject *warn_str = PyUnicode_InternFromString("warn");
+//static  PyObject *raise_str = PyUnicode_InternFromString("raise");
+//static  PyObject *call_str = PyUnicode_InternFromString("call");
+//static  PyObject *print_str = PyUnicode_InternFromString("print");
+//static  PyObject *log_str = PyUnicode_InternFromString("log");
+
+static inline PyObject *
 err_string(int x)
 {
     switch (x) {
-    case ERR_IGNORE:
-            return "ignore";
-    case ERR_WARN:
-        return "warn";
-    case ERR_RAISE:
-        return "raise";
-    case ERR_CALL:
-        return "call";
-    case ERR_PRINT:
-        return "print";
-    case ERR_LOG:
-        return "log";
+    case UFUNC_ERR_IGNORE:
+            return PyUnicode_FromString("ignore");
+    case UFUNC_ERR_WARN:
+        return PyUnicode_FromString("warn");
+    case UFUNC_ERR_RAISE:
+        return PyUnicode_FromString("raise");
+    case UFUNC_ERR_CALL:
+        return PyUnicode_FromString("call");
+    case UFUNC_ERR_PRINT:
+        return PyUnicode_FromString("print");
+    case UFUNC_ERR_LOG:
+        return PyUnicode_FromString("log");
     default:
         return NULL;
     }
@@ -5057,44 +5064,46 @@ err_string(int x)
 NPY_NO_EXPORT PyObject *
 ufunc_geterr_dictionary(PyObject *NPY_UNUSED(dummy), PyObject *(arg))
 {
-    PyLongObject *l = ufunc_geterr(NULL, NULL);
-    if (l == NULL)
-        return NULL;
-
+    if (arg==Py_None) {
+        PyObject *l = ufunc_geterr(NULL, NULL);
+        if (l == NULL)
+            return NULL;
+        arg = PyList_GET_ITEM(l, 1);
+    }
 
     const int mask = 7;
     long val;
-    int ret;
-    PySize_t maskvalue = PyInt_AsLong(arg);
-    if ((maskvalue == -1) && PyErrOccured())
+    
+    Py_ssize_t maskvalue = PyNumber_AsSsize_t(arg, PyExc_IndexError);
+    if ((maskvalue == -1) && PyErr_Occurred())
         return NULL;
     
-    result = PyDict_New();
+    PyObject *result = PyDict_New();
     if (result == NULL) {
         return NULL;
     }
-    val = (maskvalue >> SHIFT_DIVIDEBYZERO) & mask;
-    if (PyDict_SetItemString(result , "divide", err_string(val))) {
+    val = (maskvalue >> UFUNC_SHIFT_DIVIDEBYZERO) & mask;
+    if (PyDict_SetItemString(result , npy_ma_str_current_allocator, err_string(val))) {
         Py_DECREF(result);
         return NULL;
     }
-    val = (maskvalue >> SHIFT_OVERFLOW) & mask;
+    val = (maskvalue >> UFUNC_SHIFT_OVERFLOW) & mask;
     if (PyDict_SetItemString(result, "over", err_string(val))) {
         Py_DECREF(result);
         return NULL;
     }
-    val = (maskvalue >> SHIFT_UNDERFLOW) & mask;
+    val = (maskvalue >> UFUNC_SHIFT_UNDERFLOW) & mask;
     if (PyDict_SetItemString(result, "under", err_string(val))) {
         Py_DECREF(result);
         return NULL;
     }
-    val = (maskvalue >> SHIFT_INVALID) & mask;
+    val = (maskvalue >> UFUNC_SHIFT_INVALID) & mask;
     if (PyDict_SetItemString(result, "invalid", err_string(val))) {
         Py_DECREF(result);
         return NULL;
     }
 
-    return res;
+    return result;
 }
 
 NPY_NO_EXPORT PyObject *

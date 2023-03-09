@@ -165,6 +165,8 @@ def geterr():
     array([nan,  1.,  1.])
 
     """
+    return umath.geterr_dictionary(None)
+
     maskvalue = umath.geterrobj()[1]
     mask = 7
 
