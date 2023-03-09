@@ -30,6 +30,7 @@ def _parse_docstrings() -> str:
 
     """
     type_list_ret = []
+    regexp = re.compile(r'^(\s+)[-=]+\s*$')
     for name, value, doc in _docstrings_list:
         s = textwrap.dedent(doc).replace("\n", "\n    ")
 
@@ -38,7 +39,7 @@ def _parse_docstrings() -> str:
         new_lines = []
         indent = ""
         for line in lines:
-            m = re.match(r'^(\s+)[-=]+\s*$', line)
+            m = regexp.match(line)
             if m and new_lines:
                 prev = textwrap.dedent(new_lines.pop())
                 if prev == "Examples":

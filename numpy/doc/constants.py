@@ -383,6 +383,7 @@ add_newdoc('numpy', 'Infinity',
 
 
 if __doc__:
+    regexp = re.compile(r'^(\s+)[-=]+\s*$')
     constants_str = []
     constants.sort()
     for name, doc in constants:
@@ -392,7 +393,7 @@ if __doc__:
         lines = s.split("\n")
         new_lines = []
         for line in lines:
-            m = re.match(r'^(\s+)[-=]+\s*$', line)
+            m = regexp.match(line)
             if m and new_lines:
                 prev = textwrap.dedent(new_lines.pop())
                 new_lines.append('%s.. rubric:: %s' % (m.group(1), prev))
