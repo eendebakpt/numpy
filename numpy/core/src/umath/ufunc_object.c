@@ -39,6 +39,7 @@
 #include "numpy/arrayobject.h"
 #include "numpy/ufuncobject.h"
 #include "numpy/arrayscalars.h"
+#include "multiarraymodule.h"
 #include "lowlevel_strided_loops.h"
 #include "ufunc_type_resolution.h"
 #include "reduction.h"
@@ -5033,29 +5034,22 @@ ufunc_generic_vectorcall(PyObject *ufunc,
             args, PyVectorcall_NARGS(len_args), kwnames, NPY_FALSE);
 }
 
-//static  PyObject *ignore_str = PyUnicode_InternFromString("ignore");
-//static  PyObject *warn_str = PyUnicode_InternFromString("warn");
-//static  PyObject *raise_str = PyUnicode_InternFromString("raise");
-//static  PyObject *call_str = PyUnicode_InternFromString("call");
-//static  PyObject *print_str = PyUnicode_InternFromString("print");
-//static  PyObject *log_str = PyUnicode_InternFromString("log");
-
 static inline PyObject *
 err_string(int x)
 {
     switch (x) {
     case UFUNC_ERR_IGNORE:
-            return PyUnicode_FromString("ignore");
+            return npy_ma_str_err_ignore;
     case UFUNC_ERR_WARN:
-        return PyUnicode_FromString("warn");
+        return npy_ma_str_err_warn;
     case UFUNC_ERR_RAISE:
-        return PyUnicode_FromString("raise");
+        return npy_ma_str_err_raise;
     case UFUNC_ERR_CALL:
-        return PyUnicode_FromString("call");
+        return npy_ma_str_err_call;
     case UFUNC_ERR_PRINT:
-        return PyUnicode_FromString("print");
+        return npy_ma_str_err_print;
     case UFUNC_ERR_LOG:
-        return PyUnicode_FromString("log");
+        return npy_ma_str_err_log;
     default:
         return NULL;
     }
@@ -5083,22 +5077,22 @@ ufunc_geterr_dictionary(PyObject *NPY_UNUSED(dummy), PyObject *(arg))
         return NULL;
     }
     val = (maskvalue >> UFUNC_SHIFT_DIVIDEBYZERO) & mask;
-    if (PyDict_SetItemString(result , npy_ma_str_current_allocator, err_string(val))) {
+    if (PyDict_SetItem(result , npy_ma_str_err_divide, err_string(val))) {
         Py_DECREF(result);
         return NULL;
     }
     val = (maskvalue >> UFUNC_SHIFT_OVERFLOW) & mask;
-    if (PyDict_SetItemString(result, "over", err_string(val))) {
+    if (PyDict_SetItem(result, npy_ma_str_err_over, err_string(val))) {
         Py_DECREF(result);
         return NULL;
     }
     val = (maskvalue >> UFUNC_SHIFT_UNDERFLOW) & mask;
-    if (PyDict_SetItemString(result, "under", err_string(val))) {
+    if (PyDict_SetItem(result, npy_ma_str_err_under, err_string(val))) {
         Py_DECREF(result);
         return NULL;
     }
     val = (maskvalue >> UFUNC_SHIFT_INVALID) & mask;
-    if (PyDict_SetItemString(result, "invalid", err_string(val))) {
+    if (PyDict_SetItem(result, npy_ma_str_err_invalid, err_string(val))) {
         Py_DECREF(result);
         return NULL;
     }

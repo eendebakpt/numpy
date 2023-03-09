@@ -4833,6 +4833,17 @@ set_flaginfo(PyObject *d)
     return;
 }
 
+NPY_VISIBILITY_HIDDEN PyObject * npy_ma_str_err_ignore = NULL;
+NPY_VISIBILITY_HIDDEN PyObject * npy_ma_str_err_warn = NULL;
+NPY_VISIBILITY_HIDDEN PyObject * npy_ma_str_err_raise = NULL;
+NPY_VISIBILITY_HIDDEN PyObject * npy_ma_str_err_call = NULL;
+NPY_VISIBILITY_HIDDEN PyObject * npy_ma_str_err_print = NULL;
+NPY_VISIBILITY_HIDDEN PyObject * npy_ma_str_err_log = NULL;
+NPY_VISIBILITY_HIDDEN PyObject * npy_ma_str_err_divide = NULL;
+NPY_VISIBILITY_HIDDEN PyObject * npy_ma_str_err_over = NULL;
+NPY_VISIBILITY_HIDDEN PyObject * npy_ma_str_err_under = NULL;
+NPY_VISIBILITY_HIDDEN PyObject * npy_ma_str_err_invalid = NULL;
+
 NPY_VISIBILITY_HIDDEN PyObject * npy_ma_str_current_allocator = NULL;
 NPY_VISIBILITY_HIDDEN PyObject * npy_ma_str_array = NULL;
 NPY_VISIBILITY_HIDDEN PyObject * npy_ma_str_array_function = NULL;
@@ -4850,6 +4861,52 @@ NPY_VISIBILITY_HIDDEN PyObject * npy_ma_str_numpy = NULL;
 static int
 intern_strings(void)
 {
+    npy_ma_str_err_ignore = PyUnicode_InternFromString("ignore");
+    if (npy_ma_str_err_ignore == NULL) {
+        return -1;
+    }
+    npy_ma_str_err_warn = PyUnicode_InternFromString("warn");
+    if (npy_ma_str_err_warn == NULL) {
+        return -1;
+    }
+    npy_ma_str_err_raise = PyUnicode_InternFromString("raise");
+    if (npy_ma_str_err_raise == NULL) {
+        return -1;
+    }
+    npy_ma_str_err_call = PyUnicode_InternFromString("call");
+    if (npy_ma_str_err_call == NULL) {
+        return -1;
+    }
+    npy_ma_str_err_print = PyUnicode_InternFromString("print");
+    if (npy_ma_str_err_print == NULL) {
+        return -1;
+    }
+    npy_ma_str_err_log = PyUnicode_InternFromString("log");
+    if (npy_ma_str_err_log == NULL) {
+        return -1;
+    }
+    npy_ma_str_err_divide = PyUnicode_InternFromString("divide");
+    if (npy_ma_str_err_divide == NULL) {
+        return -1;
+    }    
+    npy_ma_str_err_over = PyUnicode_InternFromString("over");
+    if (npy_ma_str_err_over == NULL) {
+        return -1;
+    }    
+    npy_ma_str_err_under = PyUnicode_InternFromString("under");
+    if (npy_ma_str_err_under == NULL) {
+        return -1;
+    }
+    npy_ma_str_err_invalid = PyUnicode_InternFromString("invalid");
+    if (npy_ma_str_err_invalid == NULL) {
+        return -1;
+    }
+
+    npy_ma_str_current_allocator = PyUnicode_InternFromString("current_allocator");
+    if (npy_ma_str_current_allocator == NULL) {
+        return -1;
+    }
+
     npy_ma_str_current_allocator = PyUnicode_InternFromString("current_allocator");
     if (npy_ma_str_current_allocator == NULL) {
         return -1;

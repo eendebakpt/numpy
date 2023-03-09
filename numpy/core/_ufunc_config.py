@@ -108,7 +108,8 @@ def seterr(all=None, divide=None, over=None, under=None, invalid=None):
     """
 
     pyvals = umath.geterrobj()
-    old = geterr()
+    old = umath.geterr_dictionary(None)    
+    #old = geterr()
 
     if divide is None:
         divide = all or old['divide']
