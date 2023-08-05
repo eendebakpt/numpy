@@ -949,7 +949,7 @@ convert_ufunc_arguments(PyUFuncObject *ufunc,
                     free_array_double = (PyObject *)out_op[i] ;
                     // add reference count for our array
                     Py_INCREF(free_array_double);
-                    printf("exact float, created free_array_double %p, ref count %ld\n", free_array_double, Py_REFCNT(free_array_double));
+                    //printf("exact float, created free_array_double %p, ref count %ld\n", free_array_double, Py_REFCNT(free_array_double));
                 } else {
                     //printf("free array: \n"); print_repr(free_array_double); printf("\n");
                     Py_ssize_t free_array_ref_count = Py_REFCNT(free_array_double);
