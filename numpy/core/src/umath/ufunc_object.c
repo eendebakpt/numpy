@@ -888,16 +888,6 @@ _wheremask_converter(PyObject *obj, PyArrayObject **wheremask)
 static PyObject *free_array_double = 0;
 static PyObject *free_array_long = 0;
 
-static void print_str(PyObject *o)
-{
-    PyObject_Print(o, stdout, Py_PRINT_RAW);
-}
-
-static void print_repr(PyObject *o)
-{
-    PyObject_Print(o, stdout, 0);
-}
-
         
 /*
  * Due to the array override, do the actual parameter conversion
@@ -934,28 +924,22 @@ convert_ufunc_arguments(PyUFuncObject *ufunc,
         obj = PyTuple_GET_ITEM(full_args.in, i);
 
         if (PyArray_Check(obj)) {
-            //printf("obj is already a PyArrayObject: cool! "); print_str(Py_TYPE(obj)); printf("\n");
             out_op[i] = (PyArrayObject *)obj;
             Py_INCREF(out_op[i]);
         }
         else {
             /* Convert the input to an array and check for special cases */
             if (PyFloat_CheckExact(obj) && 1) {
-                //printf("\n# exact float, free_array_double %p\n", free_array_double);
-                //printf("input is: "); print_repr(obj); printf("\n");
                 if (free_array_double==0) {
                     // create new array
                     out_op[i] =  (PyArrayObject *)PyArray_FromAny(obj, NULL, 0, 0, 0, NULL);
                     free_array_double = (PyObject *)out_op[i] ;
                     // add reference count for our array
                     Py_INCREF(free_array_double);
-                    //printf("exact float, created free_array_double %p, ref count %ld\n", free_array_double, Py_REFCNT(free_array_double));
                 } else {
-                    //printf("free array: \n"); print_repr(free_array_double); printf("\n");
                     Py_ssize_t free_array_ref_count = Py_REFCNT(free_array_double);
 
                     if (free_array_ref_count==1) {
-                        //printf("exact float, free_array_double %p, ref count %ld: re-use!\n", free_array_double, free_array_ref_count);
                         // we hold the only reference to free_array_double, so we can use it
                         out_op[i] =  (PyArrayObject *) free_array_double;
                         Py_INCREF(free_array_double);
@@ -963,10 +947,7 @@ convert_ufunc_arguments(PyUFuncObject *ufunc,
                         // we need to update the data still
                         double * x = PyArray_DATA(out_op[i] );
                         *x = PyFloat_AS_DOUBLE(obj);
-                        //printf("got double %f from python float\n", *x);
-                        //printf("free array: \n"); print_repr(free_array_double); printf("\n");
                     } else {
-                        //printf("exact float, free_array_double %p, ref count %ld: free!\n", free_array_double, free_array_ref_count);
                         Py_DECREF(free_array_double);
                         // create new array
                         out_op[i]  = (PyArrayObject *)PyArray_FromAny(obj, NULL, 0, 0, 0, NULL);
@@ -1001,7 +982,6 @@ convert_ufunc_arguments(PyUFuncObject *ufunc,
                 }
             }
             else {
-                // printf("obj is unknown: slow path... "); print_str(Py_TYPE(obj)); printf("\n");
                 out_op[i] = (PyArrayObject *)PyArray_FromAny(obj, NULL, 0, 0, 0, NULL);
             }
             if (out_op[i] == NULL) {
