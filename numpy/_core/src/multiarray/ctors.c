@@ -18,6 +18,7 @@
 
 #include "npy_static_data.h"
 
+#include "abstractdtypes.h"
 #include "common.h"
 #include "ctors.h"
 #include "convert_datatype.h"
@@ -632,6 +633,17 @@ fail:
     PyErr_NoMemory();
 }
 
+#define FREELIST_SIZE 8
+
+// from  npy_discover_dtype_from_pytype
+struct free_list  
+{  
+    PyObject * items[FREELIST_SIZE];
+}   ;
+
+struct free_list double_free_list;  // DOUBLE_Descr, PyArray_PyFloatAbstractDType
+struct free_list int64_free_list;  // PyArray_PyIntAbstractDType
+
 /*
  * Generic new array creation routine.
  * Internal variant with calloc argument for PyArray_Zeros.
@@ -648,6 +660,38 @@ PyArray_NewFromDescr_int(
     PyArrayObject_fields *fa;
     npy_intp nbytes;
 
+    if (nd ==0 && data==0 && cflags == 0 && subtype == &PyArray_Type) {
+     // candidate for freelist
+        printf("try freelist \n");
+        // are we float or int?
+        
+        PyArray_Descr *double_descr = PyArray_DescrFromType(NPY_DOUBLE); // this should be statically allocated
+        if (descr == double_descr) {
+            printf("float freelist! \n");
+         
+            PyObject *c = double_free_list.items[0];
+             // need to initialize the freelist still, should be done only once   
+            if (c==0) { 
+                for(int i=0; i<FREELIST_SIZE; i++) {
+                    //
+                }
+            }
+            for(int i=0; i<FREELIST_SIZE; i++) {
+                PyObject *c = double_free_list.items[i];
+                printf("i %d: c %p\n", i, c);
+                
+                {
+                    // this block should be atomic to make it thread safe
+                if (Py_REFCNT(c)==1) {
+                    // free to use!
+                    Py_INCREF(c);
+                }
+                }
+            }
+        }
+        
+        
+    }
     if (descr == NULL) {
         return NULL;
     }
@@ -1550,6 +1594,8 @@ PyArray_FromAny_int(PyObject *op, PyArray_Descr *in_descr,
                     PyArray_DTypeMeta *in_DType, int min_depth, int max_depth,
                     int flags, PyObject *context, int *was_scalar)
 {
+     printf("PyArray_FromAny_int: start\n ");// print_repr(op); printf("\n");
+
     /*
      * This is the main code to make a NumPy array from a Python
      * Object.  It is called from many different places.
@@ -1688,6 +1734,13 @@ PyArray_FromAny_int(PyObject *op, PyArray_Descr *in_descr,
         npy_free_coercion_cache(cache);
         return NULL;
     }
+    
+    printf("PyArray_FromAny_int: call PyArray_NewFromDescr\n ");
+    printf("  "); print_str( (PyObject *) &PyArray_Type); printf("\n");
+    printf("  dtype %p\n", dtype);
+    printf("  ndim %d\n", ndim);
+    printf("  flags %d, NPY_ARRAY_F_CONTIGUOUS %d\n", flags, NPY_ARRAY_F_CONTIGUOUS);
+    
 
     /* Create a new array and copy the data */
     Py_INCREF(dtype);  /* hold on in case of a subarray that is replaced */
@@ -1709,6 +1762,7 @@ PyArray_FromAny_int(PyObject *op, PyArray_Descr *in_descr,
         Py_INCREF(dtype);
     }
 
+    printf("PyArray_FromAny_int: going to pack\n");
     if (cache == NULL) {
         /* This is a single item. Set it directly. */
         assert(ndim == 0);

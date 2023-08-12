@@ -25,6 +25,16 @@
 #define NPY_BEGIN_THREADS_NDITER(iter)
 #endif
 
+static inline void print_str(PyObject *o)
+{
+    PyObject_Print(o, stdout, Py_PRINT_RAW);
+}
+
+static inline void print_repr(PyObject *o)
+{
+    PyObject_Print(o, stdout, 0);
+}
+
 
 NPY_NO_EXPORT PyArray_Descr *
 PyArray_DTypeFromObjectStringDiscovery(

@@ -632,6 +632,8 @@ convert_ufunc_arguments(PyUFuncObject *ufunc,
             Py_INCREF(out_op[i]);
         }
         else {
+            printf("convert_ufunc_arguments: calling PyArray_FromAny\n");
+
             /* Convert the input to an array and check for special cases */
             out_op[i] = (PyArrayObject *)PyArray_FromAny(obj, NULL, 0, 0, 0, NULL);
             if (out_op[i] == NULL) {
