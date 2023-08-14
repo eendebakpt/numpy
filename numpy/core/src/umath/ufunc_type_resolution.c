@@ -1516,31 +1516,18 @@ PyUFunc_DefaultLegacyInnerLoopSelector(PyUFuncObject *ufunc,
     }
 
     types = ufunc->types;
-    if (0) {
-        printf("PyUFunc_DefaultLegacyInnerLoopSelector: ntypes %d, nargs %d\n", ufunc->ntypes, nargs);
-        for (i = 0; i < ufunc->ntypes; ++i) {
-            printf("  i %d: ", i);
-            for (j = 0; j < nargs; ++j) {
-                printf("%d,", (int)types[j]);
-            }
-            printf("\n");
-            types += nargs;
-        }
-    }
+
     char arg_types[NPY_MAXARGS];
     for (int j = 0; j < nargs; ++j) {
-        if (dtypes[j]->type_num > 255) {
+        if (0 && dtypes[j]->type_num > 255) {
             // valid path?
             return raise_no_loop_found_error(ufunc, (PyObject **)dtypes);
         }
-        arg_types[j] = (int)(dtypes[j]->type_num);
+        arg_types[j] = dtypes[j]->type_num;
     }
     types = ufunc->types;
     for (i = 0; i < ufunc->ntypes; ++i) {
-        /* Copy the types into an int array for matching */
-        int cmp = strncmp(types, arg_types, nargs);
-
-        if (cmp==0) {
+        if (memcmp(types, arg_types, nargs)==0) {
             *out_innerloop = ufunc->functions[i];
             *out_innerloopdata = (ufunc->data == NULL) ? NULL : ufunc->data[i];
             return 0;
