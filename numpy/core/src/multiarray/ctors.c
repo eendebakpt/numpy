@@ -633,7 +633,6 @@ fail:
     PyErr_NoMemory();
 }
 
-
 /*
  * Generic new array creation routine.
  * Internal variant with calloc argument for PyArray_Zeros.
@@ -989,19 +988,15 @@ PyArray_NewFromDescr_int(
 
 #define FREELIST_SIZE 8
 
-// from  npy_discover_dtype_from_pytype
 struct free_list_t
 {  
     PyObject * items[FREELIST_SIZE];
 }   ;
 
-struct free_list_t double_free_list;  // DOUBLE_Descr, PyArray_PyFloatAbstractDType
-struct free_list_t int64_free_list;  // PyArray_PyIntAbstractDType
-
+struct free_list_t double_free_list; 
+struct free_list_t int64_free_list;
 PyArray_Descr *double_descr = 0;
 PyArray_Descr *int_descr = 0;
-
-
 int freelist_index = 0;
 
 /*NUMPY_API
