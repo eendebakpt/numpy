@@ -990,15 +990,16 @@ PyArray_NewFromDescr_int(
 #define FREELIST_SIZE 8
 
 // from  npy_discover_dtype_from_pytype
-struct free_list  
+struct free_list_t
 {  
     PyObject * items[FREELIST_SIZE];
 }   ;
 
-struct free_list double_free_list;  // DOUBLE_Descr, PyArray_PyFloatAbstractDType
-struct free_list int64_free_list;  // PyArray_PyIntAbstractDType
+struct free_list_t double_free_list;  // DOUBLE_Descr, PyArray_PyFloatAbstractDType
+struct free_list_t int64_free_list;  // PyArray_PyIntAbstractDType
 
 PyArray_Descr *double_descr = 0;
+PyArray_Descr *int_descr = 0;
 
 
 int freelist_index = 0;
@@ -1033,8 +1034,71 @@ PyArray_NewFromDescr(
             flags, obj, NULL);
 }
 
-const int debug = 1;
+const int debug = 0;
 
+static inline void freelist_initialize(struct free_list_t *free_list, PyArray_Descr *target_descr) {
+    if (debug)
+        printf("initialize freelist: (%d elements) \n", FREELIST_SIZE);
+    for(int i=0; i<FREELIST_SIZE; i++) {
+        free_list->items[i] = PyArray_NewFromDescr_int(&PyArray_Type, target_descr, 0,
+                            NULL, NULL, NULL,
+                            0, NULL, NULL, 0);
+    }
+}
+
+
+static inline PyObject *
+freelist_allocate( struct free_list_t *free_list, PyArray_Descr *target_descr,
+        PyTypeObject *subtype, PyArray_Descr *descr,
+        int nd, npy_intp const *dims, npy_intp const *strides, void *data,
+        int flags, PyObject *obj, PyObject *base)
+{
+    if (descr != target_descr) {
+        printf("internal error\n");
+    }
+    if (debug)
+        printf("freelist for descr %p! \n", target_descr);
+
+    PyObject *c;
+    int i;
+    for(i=0; i<FREELIST_SIZE; i++) {
+        c = free_list->items[i];
+        if (debug)
+            printf("i %d: c %p: reference count %ld\n", i, c, Py_REFCNT(c));
+
+        {
+            // this block should be atomic to make it thread safe
+            if (Py_REFCNT(c)==1) {
+                // we hold the only reference, so we can use this object
+                Py_INCREF(c);
+                break;
+            }
+        }
+    }
+
+    if ( i<FREELIST_SIZE) {
+        //return PyArray_NewFromDescr_int(subtype, descr, nd, dims, strides, data, flags, obj, base, 0);
+        return c;
+    }
+    else {
+        // could not find any free element in the list
+        int replacement_index = freelist_index++ % FREELIST_SIZE;
+        Py_DECREF(free_list->items[replacement_index]);
+        
+        c = free_list->items[replacement_index] = PyArray_NewFromDescr_int(subtype, descr, nd,
+                                dims, strides, data, flags, obj, base, 0);
+        Py_INCREF(c);
+        return c;
+    }
+}
+
+static inline void freelist_static_initialize()
+{
+    double_descr = PyArray_DescrFromType(NPY_DOUBLE);
+    int_descr = PyArray_DescrFromType(NPY_INT);
+    freelist_initialize(&double_free_list, double_descr);
+    freelist_initialize(&int64_free_list, int_descr);    
+}
 
 /*
  * Sets the base object using PyArray_SetBaseObject
@@ -1050,68 +1114,36 @@ PyArray_NewFromDescrAndBase(
         printf("PyArray_NewFromDescrAndBase: subtype %p, desc %p, nd %d, flags %d\n", subtype, descr, nd, flags);
         printf("  dims ");
         for (int i =0; i<nd; i++) {
-            printf("%d,", dims[i]);
+            printf("%d,", (int)dims[i]);
         }
         printf("\n");
     }
     
+    // is this a candidate for freelist?
     if (1 && nd ==0 && data==0 && flags == 0 && subtype == &PyArray_Type && obj==0  && base==0) {
-     // candidate for freelist
         if (debug)
             printf("try freelist \n");
-        // are we float or int?
         
-        if (double_descr==0) 
+        if (double_descr==0) {
             // this should be statically allocated
-            double_descr = PyArray_DescrFromType(NPY_DOUBLE);
-            
-        if (descr == double_descr) {
-            if (debug)
-                printf("float freelist! \n");
-         
-            PyObject *c = double_free_list.items[0];
-            if (c==0) { 
-                // need to initialize the freelist still, should be done only once (and moved out of this path)   
-                if (debug)
-                    printf("initialize float freelist! (%d elements) \n", FREELIST_SIZE);
-                for(int i=0; i<FREELIST_SIZE; i++) {
-                    c = double_free_list.items[i] = PyArray_NewFromDescr_int(subtype, descr, nd,
-                                        dims, strides, data,
-                                        flags, obj, base, 0);
-                }
-            }
-            int i;
-            for(i=0; i<FREELIST_SIZE; i++) {
-                c = double_free_list.items[i];
-                if (debug)
-                    printf("i %d: c %p: reference count %ld\n", i, c, Py_REFCNT(c));
-                
-                {
-                    // this block should be atomic to make it thread safe
-                    if (Py_REFCNT(c)==1) {
-                        // we hold the only reference, so we can use this object
-                        Py_INCREF(c);
-                        break;
-                    }
-                }
-            }
-            
-            if ( i<FREELIST_SIZE) {
-                //return PyArray_NewFromDescr_int(subtype, descr, nd, dims, strides, data, flags, obj, base, 0);
-                return c;
-            }
-            else {
-                // could not find any free element in the list
-                int replacement_index = freelist_index++ % FREELIST_SIZE;
-                Py_DECREF(double_free_list.items[replacement_index]);
-                
-                c = double_free_list.items[replacement_index] = PyArray_NewFromDescr_int(subtype, descr, nd,
-                                        dims, strides, data, flags, obj, base, 0);
-                Py_INCREF(c);
-                return c;
-            }
+            freelist_static_initialize();
         }
-        
+
+        // are we float or int?
+        if (descr == double_descr) {
+            PyObject *c = freelist_allocate(&double_free_list, double_descr,
+                                        subtype, descr, nd,
+                                        dims, strides, data,
+                                        flags, obj, base);
+            return c;
+        }
+        else if (descr == int_descr) {
+            PyObject *c = freelist_allocate(&int64_free_list, int_descr,
+                                        subtype, descr, nd,
+                                        dims, strides, data,
+                                        flags, obj, base);
+            return c;
+        }
         
     }
     return PyArray_NewFromDescr_int(subtype, descr, nd,
@@ -1651,20 +1683,44 @@ PyArray_FromAny_int(PyObject *op, PyArray_Descr *in_descr,
     if (PyFloat_CheckExact(op) && flags == 0)
     {
         if (double_descr==0) 
+            freelist_static_initialize();
             // this should be statically allocated
-            double_descr = PyArray_DescrFromType(NPY_DOUBLE);
 
         dtype = double_descr;
         PyArrayObject *ret = (PyArrayObject *)PyArray_NewFromDescr(
             &PyArray_Type, dtype, 0, NULL, NULL, NULL,
             flags&NPY_ARRAY_F_CONTIGUOUS, NULL);
         if (ret==0)
-            return ret;
+            return (PyObject *)ret;
         double * x = PyArray_DATA(ret);
         *x = PyFloat_AS_DOUBLE(op);
                         
-        return ret;
+        return (PyObject *)ret;
     }
+    if (PyLong_CheckExact(op) && flags == 0)
+    {
+        if (double_descr==0) 
+            freelist_static_initialize();
+            // this should be statically allocated
+        long value = PyLong_AsLong(op); 
+        if (value==-1 && PyErr_Occurred() ) {
+            // overflow in conversion, take the slow path
+            PyErr_Clear();
+        }
+        else {
+            dtype = int_descr;
+            PyArrayObject *ret = (PyArrayObject *)PyArray_NewFromDescr(
+                &PyArray_Type, dtype, 0, NULL, NULL, NULL,
+                flags&NPY_ARRAY_F_CONTIGUOUS, NULL);
+            if (ret==0)
+                return (PyObject *)ret;
+            long * x = PyArray_DATA(ret);
+            *x = value; 
+                                                        
+            return (PyObject *)ret;
+        }
+    }
+    
     ndim = PyArray_DiscoverDTypeAndShape(op,
             NPY_MAXDIMS, dims, &cache, in_DType, in_descr, &dtype,
             flags & NPY_ARRAY_ENSURENOCOPY);
