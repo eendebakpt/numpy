@@ -633,16 +633,6 @@ fail:
     PyErr_NoMemory();
 }
 
-#define FREELIST_SIZE 8
-
-// from  npy_discover_dtype_from_pytype
-struct free_list  
-{  
-    PyObject * items[FREELIST_SIZE];
-}   ;
-
-struct free_list double_free_list;  // DOUBLE_Descr, PyArray_PyFloatAbstractDType
-struct free_list int64_free_list;  // PyArray_PyIntAbstractDType
 
 /*
  * Generic new array creation routine.
@@ -660,38 +650,6 @@ PyArray_NewFromDescr_int(
     PyArrayObject_fields *fa;
     npy_intp nbytes;
 
-    if (nd ==0 && data==0 && cflags == 0 && subtype == &PyArray_Type) {
-     // candidate for freelist
-        printf("try freelist \n");
-        // are we float or int?
-        
-        PyArray_Descr *double_descr = PyArray_DescrFromType(NPY_DOUBLE); // this should be statically allocated
-        if (descr == double_descr) {
-            printf("float freelist! \n");
-         
-            PyObject *c = double_free_list.items[0];
-             // need to initialize the freelist still, should be done only once   
-            if (c==0) { 
-                for(int i=0; i<FREELIST_SIZE; i++) {
-                    //
-                }
-            }
-            for(int i=0; i<FREELIST_SIZE; i++) {
-                PyObject *c = double_free_list.items[i];
-                printf("i %d: c %p\n", i, c);
-                
-                {
-                    // this block should be atomic to make it thread safe
-                if (Py_REFCNT(c)==1) {
-                    // free to use!
-                    Py_INCREF(c);
-                }
-                }
-            }
-        }
-        
-        
-    }
     if (descr == NULL) {
         return NULL;
     }
@@ -1029,6 +987,22 @@ PyArray_NewFromDescr_int(
 }
 
 
+#define FREELIST_SIZE 8
+
+// from  npy_discover_dtype_from_pytype
+struct free_list  
+{  
+    PyObject * items[FREELIST_SIZE];
+}   ;
+
+struct free_list double_free_list;  // DOUBLE_Descr, PyArray_PyFloatAbstractDType
+struct free_list int64_free_list;  // PyArray_PyIntAbstractDType
+
+PyArray_Descr *double_descr = 0;
+
+
+int freelist_index = 0;
+
 /*NUMPY_API
  * Generic new array creation routine.
  *
@@ -1059,6 +1033,9 @@ PyArray_NewFromDescr(
             flags, obj, NULL);
 }
 
+const int debug = 1;
+
+
 /*
  * Sets the base object using PyArray_SetBaseObject
  */
@@ -1068,6 +1045,75 @@ PyArray_NewFromDescrAndBase(
         int nd, npy_intp const *dims, npy_intp const *strides, void *data,
         int flags, PyObject *obj, PyObject *base)
 {
+    
+    if (debug) {
+        printf("PyArray_NewFromDescrAndBase: subtype %p, desc %p, nd %d, flags %d\n", subtype, descr, nd, flags);
+        printf("  dims ");
+        for (int i =0; i<nd; i++) {
+            printf("%d,", dims[i]);
+        }
+        printf("\n");
+    }
+    
+    if (1 && nd ==0 && data==0 && flags == 0 && subtype == &PyArray_Type && obj==0  && base==0) {
+     // candidate for freelist
+        if (debug)
+            printf("try freelist \n");
+        // are we float or int?
+        
+        if (double_descr==0) 
+            // this should be statically allocated
+            double_descr = PyArray_DescrFromType(NPY_DOUBLE);
+            
+        if (descr == double_descr) {
+            if (debug)
+                printf("float freelist! \n");
+         
+            PyObject *c = double_free_list.items[0];
+            if (c==0) { 
+                // need to initialize the freelist still, should be done only once (and moved out of this path)   
+                if (debug)
+                    printf("initialize float freelist! (%d elements) \n", FREELIST_SIZE);
+                for(int i=0; i<FREELIST_SIZE; i++) {
+                    c = double_free_list.items[i] = PyArray_NewFromDescr_int(subtype, descr, nd,
+                                        dims, strides, data,
+                                        flags, obj, base, 0);
+                }
+            }
+            int i;
+            for(i=0; i<FREELIST_SIZE; i++) {
+                c = double_free_list.items[i];
+                if (debug)
+                    printf("i %d: c %p: reference count %ld\n", i, c, Py_REFCNT(c));
+                
+                {
+                    // this block should be atomic to make it thread safe
+                    if (Py_REFCNT(c)==1) {
+                        // we hold the only reference, so we can use this object
+                        Py_INCREF(c);
+                        break;
+                    }
+                }
+            }
+            
+            if ( i<FREELIST_SIZE) {
+                //return PyArray_NewFromDescr_int(subtype, descr, nd, dims, strides, data, flags, obj, base, 0);
+                return c;
+            }
+            else {
+                // could not find any free element in the list
+                int replacement_index = freelist_index++ % FREELIST_SIZE;
+                Py_DECREF(double_free_list.items[replacement_index]);
+                
+                c = double_free_list.items[replacement_index] = PyArray_NewFromDescr_int(subtype, descr, nd,
+                                        dims, strides, data, flags, obj, base, 0);
+                Py_INCREF(c);
+                return c;
+            }
+        }
+        
+        
+    }
     return PyArray_NewFromDescr_int(subtype, descr, nd,
                                     dims, strides, data,
                                     flags, obj, base, 0);
@@ -1553,17 +1599,19 @@ PyArray_FromAny(PyObject *op, PyArray_Descr *newtype, int min_depth,
 {
     npy_dtype_info dt_info = {NULL, NULL};
 
-    int res = PyArray_ExtractDTypeAndDescriptor(
-        newtype, &dt_info.descr, &dt_info.dtype);
+    if (newtype) {
+        // this fast path would not be needed if PyArray_ExtractDTypeAndDescriptor was inline
+        int res = PyArray_ExtractDTypeAndDescriptor(
+            newtype, &dt_info.descr, &dt_info.dtype);
 
-    Py_XDECREF(newtype);
+        Py_XDECREF(newtype);
 
-    if (res < 0) {
-        Py_XDECREF(dt_info.descr);
-        Py_XDECREF(dt_info.dtype);
-        return NULL;
+        if (res < 0) {
+            Py_XDECREF(dt_info.descr);
+            Py_XDECREF(dt_info.dtype);
+            return NULL;
+        }
     }
-
     PyObject* ret =  PyArray_FromAny_int(op, dt_info.descr, dt_info.dtype,
                                          min_depth, max_depth, flags, context);
 
@@ -1582,7 +1630,8 @@ PyArray_FromAny_int(PyObject *op, PyArray_Descr *in_descr,
                     PyArray_DTypeMeta *in_DType, int min_depth, int max_depth,
                     int flags, PyObject *context)
 {
-     printf("PyArray_FromAny_int: start\n ");// print_repr(op); printf("\n");
+    if (debug)
+        printf("PyArray_FromAny_int: start\n ");// print_repr(op); printf("\n");
 
     /*
      * This is the main code to make a NumPy array from a Python
@@ -1598,7 +1647,24 @@ PyArray_FromAny_int(PyObject *op, PyArray_Descr *in_descr,
         PyErr_SetString(PyExc_RuntimeError, "'context' must be NULL");
         return NULL;
     }
+    
+    if (PyFloat_CheckExact(op) && flags == 0)
+    {
+        if (double_descr==0) 
+            // this should be statically allocated
+            double_descr = PyArray_DescrFromType(NPY_DOUBLE);
 
+        dtype = double_descr;
+        PyArrayObject *ret = (PyArrayObject *)PyArray_NewFromDescr(
+            &PyArray_Type, dtype, 0, NULL, NULL, NULL,
+            flags&NPY_ARRAY_F_CONTIGUOUS, NULL);
+        if (ret==0)
+            return ret;
+        double * x = PyArray_DATA(ret);
+        *x = PyFloat_AS_DOUBLE(op);
+                        
+        return ret;
+    }
     ndim = PyArray_DiscoverDTypeAndShape(op,
             NPY_MAXDIMS, dims, &cache, in_DType, in_descr, &dtype,
             flags & NPY_ARRAY_ENSURENOCOPY);
@@ -1708,12 +1774,13 @@ PyArray_FromAny_int(PyObject *op, PyArray_Descr *in_descr,
         return NULL;
     }
     
-    printf("PyArray_FromAny_int: call PyArray_NewFromDescr\n ");
-    printf("  "); print_str( (PyObject *) &PyArray_Type); printf("\n");
-    printf("  dtype %p\n", dtype);
-    printf("  ndim %d\n", ndim);
-    printf("  flags %d, NPY_ARRAY_F_CONTIGUOUS %d\n", flags, NPY_ARRAY_F_CONTIGUOUS);
-    
+    if (debug) {
+        printf("PyArray_FromAny_int: call PyArray_NewFromDescr\n ");
+        printf("  "); print_str( (PyObject *) &PyArray_Type); printf("\n");
+        printf("  dtype %p\n", dtype);
+        printf("  ndim %d\n", ndim);
+        printf("  flags %d, NPY_ARRAY_F_CONTIGUOUS %d\n", flags, NPY_ARRAY_F_CONTIGUOUS);
+    }    
 
     /* Create a new array and copy the data */
     Py_INCREF(dtype);  /* hold on in case of a subarray that is replaced */
@@ -1735,7 +1802,8 @@ PyArray_FromAny_int(PyObject *op, PyArray_Descr *in_descr,
         Py_INCREF(dtype);
     }
 
-    printf("PyArray_FromAny_int: going to pack\n");
+    if (debug)
+        printf("PyArray_FromAny_int: going to pack\n");
     if (cache == NULL) {
         /* This is a single item. Set it directly. */
         assert(ndim == 0);
