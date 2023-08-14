@@ -1029,12 +1029,13 @@ PyArray_NewFromDescr(
             flags, obj, NULL);
 }
 
-const int debug = 0;
+const int debug = 1;
 
 static inline void freelist_initialize(struct free_list_t *free_list, PyArray_Descr *target_descr) {
     if (debug)
         printf("initialize freelist: (%d elements) \n", FREELIST_SIZE);
     for(int i=0; i<FREELIST_SIZE; i++) {
+        Py_INCREF(target_descr);
         free_list->items[i] = PyArray_NewFromDescr_int(&PyArray_Type, target_descr, 0,
                             NULL, NULL, NULL,
                             0, NULL, NULL, 0);
@@ -1058,7 +1059,7 @@ freelist_allocate( struct free_list_t *free_list, PyArray_Descr *target_descr,
     int i;
     for(i=0; i<FREELIST_SIZE; i++) {
         c = free_list->items[i];
-        if (debug)
+        if (debug>=2)
             printf("i %d: c %p: reference count %ld\n", i, c, Py_REFCNT(c));
 
         {
@@ -1072,12 +1073,19 @@ freelist_allocate( struct free_list_t *free_list, PyArray_Descr *target_descr,
     }
 
     if ( i<FREELIST_SIZE) {
+        if (debug)
+            printf("  success on index %d: %p\n", i, c);
+
         //return PyArray_NewFromDescr_int(subtype, descr, nd, dims, strides, data, flags, obj, base, 0);
         return c;
     }
     else {
         // could not find any free element in the list
         int replacement_index = freelist_index++ % FREELIST_SIZE;
+        
+        if (debug)
+            printf("  replacement_index %d, ref cnt %ld\n", replacement_index, (long)Py_REFCNT(free_list->items[replacement_index]));
+            
         Py_DECREF(free_list->items[replacement_index]);
         
         c = free_list->items[replacement_index] = PyArray_NewFromDescr_int(subtype, descr, nd,
@@ -1090,9 +1098,12 @@ freelist_allocate( struct free_list_t *free_list, PyArray_Descr *target_descr,
 static inline void freelist_static_initialize()
 {
     double_descr = PyArray_DescrFromType(NPY_DOUBLE);
-    int_descr = PyArray_DescrFromType(NPY_INT);
+    int_descr = PyArray_DescrFromType(NPY_INT64);
     freelist_initialize(&double_free_list, double_descr);
     freelist_initialize(&int64_free_list, int_descr);    
+    
+    if (debug)
+        printf("freelist_static_initialize: int_descr %p, double_descr %p\n", int_descr, double_descr);
 }
 
 /*
@@ -1675,13 +1686,14 @@ PyArray_FromAny_int(PyObject *op, PyArray_Descr *in_descr,
         return NULL;
     }
     
-    if (PyFloat_CheckExact(op) && flags == 0)
+    if (PyFloat_CheckExact(op) && flags == 0 && 1)
     {
         if (double_descr==0) 
             freelist_static_initialize();
             // this should be statically allocated
 
         dtype = double_descr;
+        Py_INCREF(dtype);
         PyArrayObject *ret = (PyArrayObject *)PyArray_NewFromDescr(
             &PyArray_Type, dtype, 0, NULL, NULL, NULL,
             flags&NPY_ARRAY_F_CONTIGUOUS, NULL);
@@ -1692,18 +1704,23 @@ PyArray_FromAny_int(PyObject *op, PyArray_Descr *in_descr,
                         
         return (PyObject *)ret;
     }
-    if (PyLong_CheckExact(op) && flags == 0)
+    if (PyLong_CheckExact(op) && flags == 0 )
     {
         if (double_descr==0) 
             freelist_static_initialize();
             // this should be statically allocated
         long value = PyLong_AsLong(op); 
+       // printf("freelist on %ld\n", value);
         if (value==-1 && PyErr_Occurred() ) {
             // overflow in conversion, take the slow path
             PyErr_Clear();
         }
         else {
+            if (debug) {
+                    printf("allocate from int\n");
+            }
             dtype = int_descr;
+            Py_INCREF(dtype);
             PyArrayObject *ret = (PyArrayObject *)PyArray_NewFromDescr(
                 &PyArray_Type, dtype, 0, NULL, NULL, NULL,
                 flags&NPY_ARRAY_F_CONTIGUOUS, NULL);

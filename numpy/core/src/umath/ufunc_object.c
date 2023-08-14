@@ -27,7 +27,7 @@
 #define _MULTIARRAYMODULE
 #define _UMATHMODULE
 
-#define pdebug 0
+#define pdebug 1
 
 #define PY_SSIZE_T_CLEAN
 #include <Python.h>
