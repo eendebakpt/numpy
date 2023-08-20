@@ -1029,7 +1029,7 @@ PyArray_NewFromDescr(
             flags, obj, NULL);
 }
 
-const int debug = 1;
+const int debug = 0;
 
 static inline void freelist_initialize(struct free_list_t *free_list, PyArray_Descr *target_descr) {
     if (debug)
