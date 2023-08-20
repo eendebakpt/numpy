@@ -706,14 +706,16 @@ def _pow(mul_f, c, pow, maxpower):
         raise ValueError("Power is too large")
     elif power == 0:
         return np.array([1], dtype=c.dtype)
-    elif power == 1:
-        return c
     else:
-        # This can be made more efficient by using powers of two
-        # in the usual way.
+        remaining_power = power - 1
         prd = c
-        for i in range(2, power + 1):
-            prd = mul_f(prd, c)
+        while remaining_power > 0:
+            if remaining_power % 2 == 0:
+                c = mul_f(c,  c)
+                remaining_power = remaining_power // 2
+            else:
+                prd = mul_f(prd, c)
+                remaining_power = remaining_power - 1
         return prd
 
 
