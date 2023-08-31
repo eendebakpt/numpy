@@ -27,8 +27,6 @@
 #define _MULTIARRAYMODULE
 #define _UMATHMODULE
 
-#define pdebug 0
-
 #define PY_SSIZE_T_CLEAN
 #include <Python.h>
 
@@ -627,9 +625,6 @@ convert_ufunc_arguments(PyUFuncObject *ufunc,
     *force_legacy_promotion = NPY_FALSE;
     *promoting_pyscalars = NPY_FALSE;
     
-    if (pdebug) {
-     printf("convert_ufunc_arguments: nin %d, nout %d\n", nin, nout);   
-    }
     for (int i = 0; i < nin; i++) {
         obj = PyTuple_GET_ITEM(full_args.in, i);
 
@@ -915,9 +910,6 @@ try_trivial_single_output_loop(PyArrayMethod_Context *context,
 
     if (op[nin] == NULL) {
         Py_INCREF(context->descriptors[nin]);
-        if (pdebug) {
-         printf("try_trivial_single_output_loop: creating new output array: operation_ndim %d\n", operation_ndim);   
-        }
         op[nin] = (PyArrayObject *) PyArray_NewFromDescr(&PyArray_Type,
                 context->descriptors[nin], operation_ndim, operation_shape,
                 NULL, NULL, operation_order==NPY_ARRAY_F_CONTIGUOUS, NULL);
