@@ -307,6 +307,13 @@ def _geomspace_dispatcher(start, stop, num=None, endpoint=None, dtype=None,
                           axis=None):
     return (start, stop)
 
+from numpy import exp, abs, angle
+
+def polar2z(r,theta):
+    return r * exp( 1j * theta )
+
+def z2polar(z):
+    return ( abs(z), angle(z) )
 
 @array_function_dispatch(_geomspace_dispatcher)
 def geomspace(start, stop, num=50, endpoint=True, dtype=None, axis=0):
@@ -450,6 +457,14 @@ def geomspace(start, stop, num=50, endpoint=True, dtype=None, axis=0):
     log_stop = _nx.log10(stop)
     result = logspace(log_start, log_stop, num=num,
                       endpoint=endpoint, base=10.0, dtype=dtype)
+
+    is_complex_type = dtype.type is np.complex128  # should be more general check
+    if is_complex_type: 
+        r, phi = z2polar(result)
+        delta = phi[-1] - phi[0]
+        delta = np.mod(delta+np.pi, 2*np.pi) - np.pi # normalize to delta in [-pi, pi] range
+        phi = np.linspace(phi[0], delta + phi[0], result.size)
+        result = polar2z(r, phi)
 
     # Make sure the endpoints match the start and stop arguments. This is
     # necessary because np.exp(np.log(x)) is not necessarily equal to x.
