@@ -86,10 +86,13 @@ def _wrapreduction(obj, ufunc, method, axis, dtype, out, **kwargs):
     return ufunc.reduce(obj, axis, dtype, out, **passkwargs)
 
 
-def _wrapreduction_any_all(obj, ufunc, method, axis, out, **kwargs):
+def _wrapreduction_any_all(obj, ufunc, method, axis, out, keepdims, where):
     # Same as above function, but dtype is always bool (but never passed on)
-    passkwargs = {k: v for k, v in kwargs.items()
-                  if v is not np._NoValue}
+    passkwargs={}
+    if keepdims!= np._NoValue:
+       passkwargs['keepdims']=keepdims
+    if where!= np._NoValue:
+       passkwargs['where']=where
 
     if type(obj) is not mu.ndarray:
         try:
@@ -2542,7 +2545,7 @@ def any(a, axis=None, out=None, keepdims=np._NoValue, *, where=np._NoValue):
 
     """
     return _wrapreduction_any_all(a, np.logical_or, 'any', axis, out,
-                                  keepdims=keepdims, where=where)
+                                  keepdims, where)
 
 
 def _all_dispatcher(a, axis=None, out=None, keepdims=None, *,
@@ -2639,7 +2642,7 @@ def all(a, axis=None, out=None, keepdims=np._NoValue, *, where=np._NoValue):
 
     """
     return _wrapreduction_any_all(a, np.logical_and, 'all', axis, out,
-                                  keepdims=keepdims, where=where)
+                                  keepdims, where)
 
 
 def _cumsum_dispatcher(a, axis=None, dtype=None, out=None):
