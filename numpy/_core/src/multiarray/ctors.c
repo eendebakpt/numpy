@@ -1666,13 +1666,7 @@ PyArray_FromAny_int(PyObject *op, PyArray_Descr *in_descr,
         return NULL;
     }
 
-    if (PyFloat_CheckExact(op) && flags == 0 && 1)
-    {
-        if (double_descr==0)
-            freelist_static_initialize();
-            // this should be statically allocated
 
-<<<<<<< HEAD:numpy/_core/src/multiarray/ctors.c
     // Default is copy = None
     int copy = -1;
     int was_copied_by__array__ = 0;
@@ -1683,10 +1677,11 @@ PyArray_FromAny_int(PyObject *op, PyArray_Descr *in_descr,
         copy = 1;
     }
 
-    ndim = PyArray_DiscoverDTypeAndShape(
-            op, NPY_MAXDIMS, dims, &cache, in_DType, in_descr, &dtype,
-            copy, &was_copied_by__array__);
-=======
+    if (PyFloat_CheckExact(op) && flags == 0 && 1)
+    {
+        if (double_descr==0)
+            freelist_static_initialize();
+            // this should be statically allocated
         dtype = double_descr;
         Py_INCREF(dtype);
         PyArrayObject *ret = (PyArrayObject *)PyArray_NewFromDescr(
@@ -1725,10 +1720,9 @@ PyArray_FromAny_int(PyObject *op, PyArray_Descr *in_descr,
         }
     }
 
-    ndim = PyArray_DiscoverDTypeAndShape(op,
-            NPY_MAXDIMS, dims, &cache, in_DType, in_descr, &dtype,
-            flags & NPY_ARRAY_ENSURENOCOPY);
->>>>>>> 7b71bb865b (refactor):numpy/core/src/multiarray/ctors.c
+    ndim = PyArray_DiscoverDTypeAndShape(
+            op, NPY_MAXDIMS, dims, &cache, in_DType, in_descr, &dtype,
+            copy, &was_copied_by__array__);
 
     if (ndim < 0) {
         return NULL;
