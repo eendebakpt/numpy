@@ -66,6 +66,8 @@
 #include "npy_static_data.h"
 #include "multiarraymodule.h"
 
+#include "scalartypes.h"
+
 /********** PRINTF DEBUG TRACING **************/
 #define NPY_UF_DBG_TRACING 0
 
@@ -83,8 +85,8 @@
 /**********************************************/
 
 typedef struct {
-    PyObject *in;   /* The input arguments to the ufunc, a tuple */
-    PyObject *out;  /* The output arguments, a tuple. If no non-None outputs are
+    PyObject *in;   /* The input arguments to the ufunc, a plain array/tuple */
+    PyObject *out;  /* The output arguments, a plain array/tuple. If no non-None outputs are
                        provided, then this is NULL. */
 } ufunc_full_args;
 
@@ -593,6 +595,19 @@ _wheremask_converter(PyObject *obj, PyArrayObject **wheremask)
     }
 }
 
+static inline PyObject *
+full_args_get_in(const ufunc_full_args full_args, int i) {
+    PyObject *obj = PyTuple_GET_ITEM(full_args.in, i);
+    return obj;
+}
+
+static inline PyObject *
+full_args_get_out(const ufunc_full_args full_args, int i) {
+    PyObject *obj = PyTuple_GET_ITEM(full_args.out, i);
+    return obj;
+}
+
+
 
 /*
  * Due to the array override, do the actual parameter conversion
@@ -625,7 +640,7 @@ convert_ufunc_arguments(PyUFuncObject *ufunc,
     *force_legacy_promotion = NPY_FALSE;
     *promoting_pyscalars = NPY_FALSE;
     for (int i = 0; i < nin; i++) {
-        obj = PyTuple_GET_ITEM(full_args.in, i);
+        obj = full_args_get_in(full_args, i);
 
         if (PyArray_Check(obj)) {
             out_op[i] = (PyArrayObject *)obj;
@@ -4256,6 +4271,22 @@ replace_with_wrapped_result_and_return(PyUFuncObject *ufunc,
     return NULL;
 }
 
+static inline npy_bool
+_pure_input(PyObject *const *args, int nin)
+{
+    for (int i=0; i<nin; i++) {
+        PyObject *obj = args[i];
+        //printf("_pure_input: arg %d: %p, %s, %d\n", ii, obj, Py_TYPE(obj)->tp_name, PyArray_CheckExact(obj));
+        /* Fast return for ndarray or numpy scalar*/
+        if (!(PyArray_CheckExact(obj) || is_anyscalar_exact(obj))) {
+            return 0;
+        }
+    }
+    //   printf("_pure_input: yes!\n");
+    return 1;
+
+}
+
 
 /*
  * Main ufunc call implementation.
@@ -4287,7 +4318,7 @@ ufunc_generic_fastcall(PyUFuncObject *ufunc,
         return NULL;
     }
     memset(scratch_objs, 0, sizeof(void *) * (nop * 4 + 2));
-    
+
     PyArray_DTypeMeta **signature = (PyArray_DTypeMeta **)scratch_objs;
     PyArrayObject **operands = (PyArrayObject **)(signature + nop);
     PyArray_DTypeMeta **operand_DTypes = (PyArray_DTypeMeta **)(operands + nop + 1);
@@ -4298,7 +4329,7 @@ ufunc_generic_fastcall(PyUFuncObject *ufunc,
      * positional arguments. We extract these first and check for `out`
      * passed by keyword later.
      * Outputs and inputs are stored in `full_args.in` and `full_args.out`
-     * as tuples (or NULL when no outputs are passed).
+     * as plain arrays (or NULL when no outputs are passed).
      */
 
     /* Check number of arguments */
@@ -4349,7 +4380,7 @@ ufunc_generic_fastcall(PyUFuncObject *ufunc,
     else {
         full_args.out = NULL;
     }
-
+    //printf(" out_is_passed_by_position %d\n", out_is_passed_by_position);
     /*
      * We have now extracted (but not converted) the input arguments.
      * To simplify overrides, extract all other arguments (as objects only)
@@ -4425,6 +4456,12 @@ ufunc_generic_fastcall(PyUFuncObject *ufunc,
         }
     }
 
+
+    //printf(" out_is_passed_by_position %d full_args.out %p\n", out_is_passed_by_position, full_args.out);
+
+    npy_bool pure_input = _pure_input(args, nin) && (full_args.out == NULL);
+    //printf("pure input? pure_input %d, nin %d\n", pure_input, nin);
+
     char *method;
     if (!outer) {
         method = "__call__";
@@ -4434,16 +4471,20 @@ ufunc_generic_fastcall(PyUFuncObject *ufunc,
     }
     /* We now have all the information required to check for Overrides */
     PyObject *override = NULL;
-    errval = PyUFunc_CheckOverride(ufunc, method,
-            full_args.in, full_args.out, where_obj,
-            args, len_args, kwnames, &override);
-    if (errval) {
-        goto fail;
-    }
-    else if (override) {
-        Py_DECREF(full_args.in);
-        Py_XDECREF(full_args.out);
-        return override;
+    if (!pure_input) {
+        errval = PyUFunc_CheckOverride(ufunc, method,
+                full_args.in, full_args.out, where_obj,
+                args, len_args, kwnames, &override);
+        if (errval) {
+            goto fail;
+        }
+        else if (override) {
+            Py_DECREF(full_args.in);
+            Py_XDECREF(full_args.out);
+            return override;
+        }
+    } else {
+        //printf("pure input! nin %d\n", nin);
     }
 
     if (outer) {
