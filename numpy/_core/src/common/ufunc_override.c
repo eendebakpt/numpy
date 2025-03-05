@@ -9,6 +9,7 @@
 #include "ufunc_override.h"
 #include "scalartypes.h"
 #include "npy_static_data.h"
+#include "common.h"
 
 /*
  * Check whether an object has __array_ufunc__ defined on its class and it
