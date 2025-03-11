@@ -44,7 +44,12 @@ static inline Py_hash_t
 identity_list_hash(PyObject *const *v, int len)
 {
     Py_uhash_t acc = _NpyHASH_XXPRIME_5;
-    for (int i = 0; i < len; i++) {
+    size_t y = (size_t)v[0];
+    Py_uhash_t lane = (y >> 4) | (y << (8 * SIZEOF_VOID_P - 4));
+    acc += lane * _NpyHASH_XXPRIME_2;
+    for (int i = 1; i < len; i++) {
+        acc = _NpyHASH_XXROTATE(acc);
+        acc *= _NpyHASH_XXPRIME_1;
         /*
          * Lane is the single item hash, which for us is the rotated pointer.
          * Identical to the python type hash (pointers end with 0s normally).
@@ -52,8 +57,6 @@ identity_list_hash(PyObject *const *v, int len)
         size_t y = (size_t)v[i];
         Py_uhash_t lane = (y >> 4) | (y << (8 * SIZEOF_VOID_P - 4));
         acc += lane * _NpyHASH_XXPRIME_2;
-        acc = _NpyHASH_XXROTATE(acc);
-        acc *= _NpyHASH_XXPRIME_1;
     }
     return acc;
 }
