@@ -4115,6 +4115,8 @@ resolve_descriptors(int nop,
          * The dtype may mismatch the signature, in which case we need
          * to make it fit before calling the resolution.
          */
+        // XX: in the happy path this increfs the descr, only to decref later
+        // could the dtype of the operands change? if not, we can use a borrowed reference here
         original_descrs[i] = PyArray_CastDescrToDType(descr, signature[i]);
         if (original_descrs[i] == NULL) {
             goto finish;
@@ -4126,6 +4128,8 @@ resolve_descriptors(int nop,
         /* The default: use the `ufuncimpl` as nature intended it */
         npy_intp view_offset = NPY_MIN_INTP;  /* currently ignored */
 
+        // this one is expensive, need to find the definition
+        // in the happy path safety is set to > 0. why? we should be good
         safety = ufuncimpl->resolve_descriptors(ufuncimpl,
                 signature, original_descrs, dtypes, &view_offset);
         goto check_safety;
@@ -4256,6 +4260,38 @@ replace_with_wrapped_result_and_return(PyUFuncObject *ufunc,
     return NULL;
 }
 
+static void print_str(PyObject *o)
+{
+    PyObject_Print(o, stdout, Py_PRINT_RAW);
+}
+static void print_repr(PyObject *o)
+{
+    PyObject_Print(o, stdout, 0);
+}
+
+static inline void _list_objects(PyObject **operands, int n)
+{
+    for(int i=0; i<n; i++) {
+        printf("  ");
+        if(operands[i]==NULL)
+            printf("NULL");
+        else
+            print_repr(operands[i]);
+        printf("\n");
+    }
+}
+static inline void _print_state(PyUFuncObject *ufunc, PyObject **operands, PyObject **operand_DTypes, PyObject **signature)
+{
+    //return;
+    printf("ufunc: %s: nin %d nout %d\n", ufunc->name, ufunc->nin, ufunc->nout);
+    int n = ufunc->nin+ufunc->nout;
+    printf("operands:\n");
+    _list_objects((PyObject **)operands, n);
+    printf("operand_DTypes:\n");
+    _list_objects(operand_DTypes, n);
+    printf("signature:\n");
+    _list_objects(signature, n);
+}
 
 /*
  * Main ufunc call implementation.
@@ -4287,7 +4323,7 @@ ufunc_generic_fastcall(PyUFuncObject *ufunc,
         return NULL;
     }
     memset(scratch_objs, 0, sizeof(void *) * (nop * 4 + 2));
-    
+
     PyArray_DTypeMeta **signature = (PyArray_DTypeMeta **)scratch_objs;
     PyArrayObject **operands = (PyArrayObject **)(signature + nop);
     PyArray_DTypeMeta **operand_DTypes = (PyArray_DTypeMeta **)(operands + nop + 1);
@@ -4315,14 +4351,20 @@ ufunc_generic_fastcall(PyUFuncObject *ufunc,
     if (full_args.in == NULL) {
         goto fail;
     }
+    int happy_path = 1; // only exact arrays, single output argument, output also of exact array type
+
+
+    for (int i =0; i< ufunc->nin; i++) {
+        happy_path = happy_path && PyArray_CheckExact(args[i]);
+    }
 
     /*
      * If there are more arguments, they define the out args. Otherwise
      * full_args.out is NULL for now, and the `out` kwarg may still be passed.
      */
     npy_bool out_is_passed_by_position = len_args > nin;
+    npy_bool all_none = NPY_TRUE;
     if (out_is_passed_by_position) {
-        npy_bool all_none = NPY_TRUE;
 
         full_args.out = PyTuple_New(nout);
         if (full_args.out == NULL) {
@@ -4425,6 +4467,7 @@ ufunc_generic_fastcall(PyUFuncObject *ufunc,
         }
     }
 
+    happy_path = 1 && happy_path && (nout==1) && (all_none) && (!outer);
     char *method;
     if (!outer) {
         method = "__call__";
@@ -4433,36 +4476,39 @@ ufunc_generic_fastcall(PyUFuncObject *ufunc,
         method = "outer";
     }
     /* We now have all the information required to check for Overrides */
-    PyObject *override = NULL;
-    errval = PyUFunc_CheckOverride(ufunc, method,
-            full_args.in, full_args.out, where_obj,
-            args, len_args, kwnames, &override);
-    if (errval) {
-        goto fail;
-    }
-    else if (override) {
-        Py_DECREF(full_args.in);
-        Py_XDECREF(full_args.out);
-        return override;
-    }
 
-    if (outer) {
-        /* Outer uses special preparation of inputs (expand dims) */
-        PyObject *new_in = prepare_input_arguments_for_outer(full_args.in, ufunc);
-        if (new_in == NULL) {
+    if (!happy_path) {
+        PyObject *override = NULL;
+        errval = PyUFunc_CheckOverride(ufunc, method,
+                full_args.in, full_args.out, where_obj,
+                args, len_args, kwnames, &override);
+        if (errval) {
             goto fail;
         }
-        Py_SETREF(full_args.in, new_in);
+        else if (override) {
+            Py_DECREF(full_args.in);
+            Py_XDECREF(full_args.out);
+            return override;
+        }
+
+        if (outer) {
+            /* Outer uses special preparation of inputs (expand dims) */
+            PyObject *new_in = prepare_input_arguments_for_outer(full_args.in, ufunc);
+            if (new_in == NULL) {
+                goto fail;
+            }
+            Py_SETREF(full_args.in, new_in);
+        }
+        /*
+        * Parse the passed `dtype` or `signature` into an array containing
+        * PyArray_DTypeMeta and/or None.
+        */
+        if (_get_fixed_signature(ufunc,
+                dtype_obj, signature_obj, signature) < 0) {
+            goto fail;
+        }
     }
 
-    /*
-     * Parse the passed `dtype` or `signature` into an array containing
-     * PyArray_DTypeMeta and/or None.
-     */
-    if (_get_fixed_signature(ufunc,
-            dtype_obj, signature_obj, signature) < 0) {
-        goto fail;
-    }
 
     NPY_ORDER order = NPY_KEEPORDER;
     NPY_CASTING casting = NPY_DEFAULT_ASSIGN_CASTING;
@@ -4493,6 +4539,8 @@ ufunc_generic_fastcall(PyUFuncObject *ufunc,
      * in the future.  For now, we do it here.  The type resolution step can
      * be shared between the ufunc and gufunc code.
      */
+
+    _print_state(ufunc, (PyObject **)operands, (PyObject **)operand_DTypes, (PyObject **)signature);
     PyArrayMethodObject *ufuncimpl = promote_and_get_ufuncimpl(ufunc,
             operands, signature,
             operand_DTypes, force_legacy_promotion,
@@ -4538,9 +4586,15 @@ ufunc_generic_fastcall(PyUFuncObject *ufunc,
             Py_DECREF(operands[i]);
         }
     }
-    /* The following steals the references to the outputs: */
-    PyObject *result = replace_with_wrapped_result_and_return(ufunc,
-            full_args, subok, operands+nin);
+    PyObject *result;
+    if (happy_path) {
+        result = (PyObject *)(operands[nin]);
+    }
+    else {
+        /* The following steals the references to the outputs: */
+        result = replace_with_wrapped_result_and_return(ufunc,
+                full_args, subok, operands+nin);
+    }
     Py_XDECREF(full_args.in);
     Py_XDECREF(full_args.out);
 
