@@ -73,3 +73,15 @@ def test_array_wrap(subclass_self, subclass_arr):
     # Non 0-D array can't be converted to scalar, so we ignore that
     arr1d = np.array([3], dtype=np.int8).view(subclass_arr)
     assert type(arr.__array_wrap__(arr1d, None, True)) is type(arr)
+
+def test_array_dtype_set():
+    msg = "Setting the dtype on a Numpy array has been deprecated"
+    arr = np.arange(48)
+    with pytest.warns(DeprecationWarning, match=msg):
+        arr.dtype = np.int64
+
+def test_array_strides_set():
+    msg = "Setting the strides on a Numpy array has been deprecated"
+    arr = np.arange(48)
+    with pytest.warns(DeprecationWarning, match=msg):
+        arr.strides = arr.strides
