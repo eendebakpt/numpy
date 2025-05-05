@@ -22,7 +22,6 @@
 #include "array_assign.h"
 
 #include "convert.h"
-#include "getset.h"
 #include "array_coercion.h"
 #include "refcount.h"
 

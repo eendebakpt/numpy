@@ -522,13 +522,6 @@ array_descr_set(PyArrayObject *self, PyObject *arg, void *NPY_UNUSED(ignored))
 }
 
 
-extern NPY_NO_EXPORT int
-array_descr_set_internal(PyArrayObject *self, PyObject *arg)
-{
-    printf("array_descr_set_internal %p %p: %ld\n", self, arg,Py_REFCNT(self));
-    //assert(Py_REFCNT(self) == 1);
-    return array_descr_set_lock_held(self, arg);
-}
 
 
 static PyObject *
