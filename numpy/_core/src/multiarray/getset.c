@@ -125,10 +125,10 @@ array_strides_set(PyArrayObject *self, PyObject *obj, void *NPY_UNUSED(ignored))
     Py_buffer view;
 
     /* DEPRECATED 2025-05-04, NumPy 2.3 */
-    printf("Setting the strides on a Numpy array ...\n");
-    PyErr_WarnEx(PyExc_DeprecationWarning,
-                "Setting the strides on a Numpy array has been deprecated in Numpy 2.3.\n",
-                1);
+    //printf("Setting the strides on a Numpy array ...\n");
+    //PyErr_WarnEx(PyExc_DeprecationWarning,
+    //            "Setting the strides on a Numpy array has been deprecated in Numpy 2.3.\n",
+    //            1);
 
     if (obj == NULL) {
         PyErr_SetString(PyExc_AttributeError,
@@ -374,7 +374,8 @@ array_nbytes_get(PyArrayObject *self, void *NPY_UNUSED(ignored))
  * will be adjusted in that case as well.
  */
 static int
-array_descr_set_lock_held(PyArrayObject *self, PyObject *arg)
+array_descr_set(PyArrayObject *self, PyObject *arg, void *NPY_UNUSED(ignored))
+//array_descr_set_lock_held(PyArrayObject *self, PyObject *arg)
 {
     PyArray_Descr *newtype = NULL;
 
@@ -520,20 +521,6 @@ array_descr_set_lock_held(PyArrayObject *self, PyObject *arg)
     return -1;
 }
 
-static int
-array_descr_set(PyArrayObject *self, PyObject *arg, void *NPY_UNUSED(ignored))
-{
-    printf("array_descr_set %p %p\n", self, arg);
-
-    /* DEPRECATED 2025-05-04, NumPy 2.3 */
-    /*
-    PyErr_WarnEx(PyExc_DeprecationWarning,
-                "Setting the dtype on a Numpy array has been deprecated in Numpy 2.3.\n"
-                "Instead of changing the dtype on an array x, create a new array with x.view(new_dtype)",
-                1);
-                */
-    return array_descr_set_lock_held(self, arg);
-}
 
 extern NPY_NO_EXPORT int
 array_descr_set_internal(PyArrayObject *self, PyObject *arg)
