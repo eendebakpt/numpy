@@ -539,7 +539,9 @@ PyArray_View(PyArrayObject *self, PyArray_Descr *type, PyTypeObject *pytype)
     }
 
     if (type != NULL) {
-        if (array_descr_set_internal(ret, (PyObject *)type) < 0) {
+        if (PyObject_SetAttrString((PyObject *)ret, "dtype",
+                                   (PyObject *)type) < 0) {
+        //if (array_descr_set_internal(ret, (PyObject *)type) < 0) {
             Py_DECREF(ret);
             Py_DECREF(type);
             return NULL;
