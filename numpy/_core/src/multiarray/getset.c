@@ -373,15 +373,9 @@ array_nbytes_get(PyArrayObject *self, void *NPY_UNUSED(ignored))
  * will be adjusted in that case as well.
  */
 static int
-array_descr_set(PyArrayObject *self, PyObject *arg, void *NPY_UNUSED(ignored))
+array_descr_set_lock_held(PyArrayObject *self, PyObject *arg)
 {
     PyArray_Descr *newtype = NULL;
-
-    /* DEPRECATED 2025-05-04, NumPy 2.3 */
-    PyErr_WarnEx(PyExc_DeprecationWarning,
-                "Setting the dtype on a Numpy array has been deprecated in Numpy 2.3.\n"
-                "Instead of changing the dtype on an array x, create a new array with numpy.frombuffer(x, dtype=new_dtype)",
-                1);
 
     if (arg == NULL) {
         PyErr_SetString(PyExc_AttributeError,
@@ -524,6 +518,28 @@ array_descr_set(PyArrayObject *self, PyObject *arg, void *NPY_UNUSED(ignored))
     Py_DECREF(newtype);
     return -1;
 }
+
+static int
+array_descr_set(PyArrayObject *self, PyObject *arg, void *NPY_UNUSED(ignored))
+{
+    printf("array_descr_set_internal %p %p: %d\n", self, arg);
+
+    /* DEPRECATED 2025-05-04, NumPy 2.3 */
+    PyErr_WarnEx(PyExc_DeprecationWarning,
+                "Setting the dtype on a Numpy array has been deprecated in Numpy 2.3.\n"
+                "Instead of changing the dtype on an array x, create a new array with x.view(new_dtype)",
+                1);
+    return array_descr_set_lock_held(self, arg);
+}
+
+extern NPY_NO_EXPORT int
+array_descr_set_internal(PyArrayObject *self, PyObject *arg)
+{
+    printf("array_descr_set_internal %p %p: %d\n", self, arg,Py_REFCNT(self));
+    assert(Py_REFCNT(self) == 1);
+    return array_descr_set_lock_held(self, arg);
+}
+
 
 static PyObject *
 array_struct_get(PyArrayObject *self, void *NPY_UNUSED(ignored))
