@@ -3829,44 +3829,58 @@ _check_and_copy_sig_to_signature(
  * deprecated instances. (Users should not notice that much, since `np.float64`
  * or "float64" usually denotes the DType class rather than the instance.)
  */
+/*
+ * Extract the DTypeMeta from an owned descriptor reference.
+ * Steals a reference to descr.
+ */
+static PyArray_DTypeMeta *
+_get_dtype_from_descr(PyArray_Descr *descr) {
+    PyArray_DTypeMeta *out = NPY_DTYPE(descr);
+    if (NPY_UNLIKELY(!NPY_DT_is_legacy(out))) {
+        /* TODO: this path was unreachable when added. */
+        PyErr_SetString(PyExc_TypeError,
+                "Cannot pass a new user DType instance to the `dtype` or "
+                "`signature` arguments of ufuncs. Pass the DType class "
+                "instead.");
+        Py_DECREF(descr);
+        return NULL;
+    }
+    else if (NPY_UNLIKELY(out->singleton != descr)) {
+        /* This does not warn about `metadata`, but units is important. */
+        if (out->singleton == NULL
+                || !PyArray_EquivTypes(out->singleton, descr)) {
+            PyErr_SetString(PyExc_TypeError,
+                    "The `dtype` and `signature` arguments to "
+                    "ufuncs only select the general DType and not details "
+                    "such as the byte order or time unit. "
+                    "You can avoid this error by using the scalar types "
+                    "`np.float64` or the dtype string notation.");
+            Py_DECREF(descr);
+            return NULL;
+        }
+    }
+    Py_INCREF(out);
+    Py_DECREF(descr);
+    return out;
+}
+
 static PyArray_DTypeMeta *
 _get_dtype(PyObject *dtype_obj) {
     if (PyObject_TypeCheck(dtype_obj, &PyArrayDTypeMeta_Type)) {
         Py_INCREF(dtype_obj);
         return (PyArray_DTypeMeta *)dtype_obj;
     }
+    else if (PyArray_DescrCheck(dtype_obj)) {
+        /* Fast path: already a descriptor, skip DescrConverter */
+        Py_INCREF(dtype_obj);
+        return _get_dtype_from_descr((PyArray_Descr *)dtype_obj);
+    }
     else {
         PyArray_Descr *descr = NULL;
         if (!PyArray_DescrConverter(dtype_obj, &descr)) {
             return NULL;
         }
-        PyArray_DTypeMeta *out = NPY_DTYPE(descr);
-        if (NPY_UNLIKELY(!NPY_DT_is_legacy(out))) {
-            /* TODO: this path was unreachable when added. */
-            PyErr_SetString(PyExc_TypeError,
-                    "Cannot pass a new user DType instance to the `dtype` or "
-                    "`signature` arguments of ufuncs. Pass the DType class "
-                    "instead.");
-            Py_DECREF(descr);
-            return NULL;
-        }
-        else if (NPY_UNLIKELY(out->singleton != descr)) {
-            /* This does not warn about `metadata`, but units is important. */
-            if (out->singleton == NULL
-                    || !PyArray_EquivTypes(out->singleton, descr)) {
-                PyErr_SetString(PyExc_TypeError,
-                        "The `dtype` and `signature` arguments to "
-                        "ufuncs only select the general DType and not details "
-                        "such as the byte order or time unit. "
-                        "You can avoid this error by using the scalar types "
-                        "`np.float64` or the dtype string notation.");
-                Py_DECREF(descr);
-                return NULL;
-            }
-        }
-        Py_INCREF(out);
-        Py_DECREF(descr);
-        return out;
+        return _get_dtype_from_descr(descr);
     }
 }
 
