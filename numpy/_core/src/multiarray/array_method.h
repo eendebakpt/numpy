@@ -65,6 +65,8 @@ typedef struct PyArrayMethodObject_tag {
     PyArrayMethod_TranslateLoopDescriptors *translate_loop_descrs;
     /* Chunk reserved for use by the legacy fallback arraymethod */
     char legacy_initial[sizeof(npy_clongdouble)];  /* initial value storage */
+    void *legacy_loop;  /* cached legacy loop function (PyUFuncGenericFunction) */
+    void *legacy_user_data;  /* cached legacy loop user data */
 } PyArrayMethodObject;
 
 
