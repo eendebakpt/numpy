@@ -89,7 +89,7 @@ get_new_loop_data(
  * This is a thin wrapper around the legacy loop signature.
  */
 static int
-generic_wrapped_legacy_loop(PyArrayMethod_Context *NPY_UNUSED(context),
+call_auxdata_loop(PyArrayMethod_Context *NPY_UNUSED(context),
         char *const *data, const npy_intp *dimensions, const npy_intp *strides,
         NpyAuxData *auxdata)
 {
@@ -107,14 +107,15 @@ generic_wrapped_legacy_loop(PyArrayMethod_Context *NPY_UNUSED(context),
  * instead of heap-allocated auxdata.
  */
 static int
-generic_wrapped_legacy_loop_cached(PyArrayMethod_Context *context,
+call_cached_loop(PyArrayMethod_Context *context,
         char *const *data, const npy_intp *dimensions, const npy_intp *strides,
         NpyAuxData *NPY_UNUSED(auxdata))
 {
-    ((PyUFuncGenericFunction)context->method->legacy_loop)(
+    PyArrayMethodObject *method = context->method;
+    ((PyUFuncGenericFunction)method->cached_loop)(
             (char **)data, dimensions, strides,
-            context->method->legacy_user_data);
-    if ((context->method->flags & NPY_METH_REQUIRES_PYAPI) &&
+            method->cached_loop_data);
+    if ((method->flags & NPY_METH_REQUIRES_PYAPI) &&
             PyErr_Occurred()) {
         return -1;
     }
@@ -237,8 +238,6 @@ get_wrapped_legacy_ufunc_loop(PyArrayMethod_Context *context,
         return -1;
     }
 
-    *flags = context->method->flags & NPY_METH_RUNTIME_FLAGS;
-
     /*
      * Use cached loop if available (set at method creation time).
      * This avoids the PyUFunc_DefaultLegacyInnerLoopSelector linear search
@@ -250,8 +249,9 @@ get_wrapped_legacy_ufunc_loop(PyArrayMethod_Context *context,
      * type_nums. The fallback below is kept as a safety net for edge
      * cases such as third-party ufuncs with userloops.
      */
-    if (context->method->legacy_loop != NULL) {
-        *out_loop = &generic_wrapped_legacy_loop_cached;
+    *flags = context->method->flags & NPY_METH_RUNTIME_FLAGS;
+    if (context->method->cached_loop != NULL) {
+        *out_loop = &call_cached_loop;
         *out_transferdata = NULL;
         return 0;
     }
@@ -274,7 +274,7 @@ get_wrapped_legacy_ufunc_loop(PyArrayMethod_Context *context,
         *flags |= NPY_METH_REQUIRES_PYAPI;
     }
 
-    *out_loop = &generic_wrapped_legacy_loop;
+    *out_loop = &call_auxdata_loop;
     *out_transferdata = get_new_loop_data(
             loop, user_data, (*flags & NPY_METH_REQUIRES_PYAPI) != 0);
     if (*out_transferdata == NULL) {
@@ -515,12 +515,12 @@ PyArray_NewLegacyWrappingArrayMethod(PyUFuncObject *ufunc,
         if (PyUFunc_DefaultLegacyInnerLoopSelector(
                 ufunc, descrs, &loop, &user_data, &needs_api) < 0) {
             PyErr_Clear();
-            res->legacy_loop = NULL;
-            res->legacy_user_data = NULL;
+            res->cached_loop = NULL;
+            res->cached_loop_data = NULL;
         }
         else {
-            res->legacy_loop = loop;
-            res->legacy_user_data = user_data;
+            res->cached_loop = loop;
+            res->cached_loop_data = user_data;
         }
     }
 
