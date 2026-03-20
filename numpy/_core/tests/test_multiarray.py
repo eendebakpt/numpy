@@ -4407,6 +4407,14 @@ class TestTemporaryElide:
         assert_array_equal(orig, d)
         assert_array_equal(res, d + d)
 
+    def test_extension_incref_elide_non_array(self):
+        # gh-XXXXX: passing a non-ndarray would crash the interpreter
+        from numpy._core._multiarray_tests import incref_elide
+        with pytest.raises(TypeError):
+            incref_elide(123)
+        with pytest.raises(TypeError):
+            incref_elide("string")
+
     def test_extension_incref_elide_stack(self):
         # scanning if the refcount == 1 object is on the python stack to check
         # that we are called directly from python is flawed as object may still

@@ -621,13 +621,18 @@ incref_elide(PyObject *dummy, PyObject *args)
     if (!PyArg_ParseTuple(args, "O", &arg)) {
         return NULL;
     }
+    if (!PyArray_Check(arg)) {
+        PyErr_SetString(PyExc_TypeError, "argument must be an ndarray");
+        return NULL;
+    }
 
     /* refcount 1 array but should not be elided */
     arg = PyArray_NewCopy((PyArrayObject*)arg, NPY_KEEPORDER);
     res = PyNumber_Add(arg, arg);
 
     /* return original copy, should be equal to input */
-    tup = PyTuple_Pack(2, arg, res);
+    PyObject *items[] = {arg, res};
+    tup = PyTuple_FromArray(items, 2);
     Py_DECREF(arg);
     Py_DECREF(res);
     return tup;
