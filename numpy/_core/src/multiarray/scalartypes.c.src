@@ -39,6 +39,7 @@
 #include "npy_static_data.h"
 #include "multiarraymodule.h"
 #include "array_api_standard.h"
+#include "npy_freelist.h"
 
 #include <stdlib.h>
 
@@ -84,17 +85,27 @@ static PyObject *
 gentype_alloc(PyTypeObject *type, Py_ssize_t nitems)
 {
     PyObject *obj;
-    const size_t size = _PyObject_VAR_SIZE(type, nitems + 1);
 
+    if (type->tp_itemsize == 0) {
+        /*
+         * Fixed-size numeric scalar: try the freelist first.
+         * The freelist is indexed by tp_basicsize, so all types with the
+         * same basicsize share one freelist (e.g., int64, uint64, float64).
+         */
+        obj = (PyObject *)npy_scalar_freelist_pop(type->tp_basicsize);
+        if (obj != NULL) {
+            memset(obj, 0, type->tp_basicsize);
+            PyObject_Init(obj, type);
+            return obj;
+        }
+    }
+
+    const size_t size = _PyObject_VAR_SIZE(type, nitems + 1);
     obj = (PyObject *)PyObject_Malloc(size);
     if (obj == NULL) {
         PyErr_NoMemory();
         return NULL;
     }
-    /*
-     * If we don't need to zero memory, we could use
-     * PyObject_{New, NewVar} for this whole function.
-     */
     memset(obj, 0, size);
     if (type->tp_itemsize == 0) {
         PyObject_Init(obj, type);
@@ -115,11 +126,19 @@ static void
 gentype_free(PyObject *v)
 {
     /*
-     * have an explicit tp_free to enforce inheritance from it.
+     * Have an explicit tp_free to enforce inheritance from it.
      * PyObject_Free is also the tp_free of PyBaseObject so python does not
      * COPYSLOT it, instead it takes the next parent PyInt which has a
-     * different allocator
+     * different allocator.
+     *
+     * For fixed-size numeric scalars, try to recycle via the freelist
+     * to avoid repeated malloc/free in tight scalar loops.
      */
+    PyTypeObject *type = Py_TYPE(v);
+    if (type->tp_itemsize == 0
+            && npy_scalar_freelist_push(type->tp_basicsize, (void *)v)) {
+        return;
+    }
     PyObject_Free(v);
 }
 
