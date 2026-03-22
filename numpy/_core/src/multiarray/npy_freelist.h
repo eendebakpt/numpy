@@ -4,15 +4,10 @@
  * Inspired by CPython's freelist infrastructure
  * (cpython/Include/internal/pycore_freelist.h).
  *
- * PYTHON SOFTWARE FOUNDATION LICENSE VERSION 2
- * Copyright (c) 2001-2025 Python Software Foundation.
- * All Rights Reserved.
- *
- * SPDX-License-Identifier: PSF-2.0
- *
  * Design:
- *   - Thread safety is achieved using thread-local storage (NPY_TLS).
- *     Each thread has its own set of freelists, so no locking is needed.
+ *   - Freelists are per-thread, accessed via PyThread_tss_get() which
+ *     uses pthread_getspecific() — much cheaper than __tls_get_addr
+ *     for dlopen'd extension modules.
  *   - Freelists are organized by allocation size (tp_basicsize), not by
  *     type. This allows a single freelist to serve all scalar types of the
  *     same size (e.g., int64, uint64, float64, complex64 all share the
@@ -43,11 +38,46 @@ typedef struct {
     int size;        /* number of items on this freelist */
 } npy_scalar_freelist;
 
+typedef struct {
+    npy_scalar_freelist freelists[NPY_NUM_SCALAR_FREELISTS];
+} npy_scalar_freelists;
+
 /* Allocation sizes served by each freelist slot. */
 static const int _npy_freelist_sizes[NPY_NUM_SCALAR_FREELISTS] = {40, 48, 64};
 
-static NPY_TLS npy_scalar_freelist
-        _npy_scalar_freelists[NPY_NUM_SCALAR_FREELISTS] = {{NULL, 0}, {NULL, 0}, {NULL, 0}};
+/*
+ * Thread-specific key for per-thread freelists.
+ * Must be initialized once via npy_freelist_init().
+ */
+extern Py_tss_t _npy_freelist_tss_key;
+
+/*
+ * Initialize the TSS key. Call once during module init.
+ * Returns 0 on success, -1 on failure.
+ */
+static inline int
+npy_freelist_init(void)
+{
+    if (PyThread_tss_is_created(&_npy_freelist_tss_key)) {
+        return 0;
+    }
+    return PyThread_tss_create(&_npy_freelist_tss_key);
+}
+
+static inline npy_scalar_freelists *
+_npy_get_freelists(void)
+{
+    void *ptr = PyThread_tss_get(&_npy_freelist_tss_key);
+    if (NPY_LIKELY(ptr != NULL)) {
+        return (npy_scalar_freelists *)ptr;
+    }
+    npy_scalar_freelists *fl = (npy_scalar_freelists *)PyMem_RawCalloc(
+        1, sizeof(npy_scalar_freelists));
+    if (fl != NULL) {
+        PyThread_tss_set(&_npy_freelist_tss_key, fl);
+    }
+    return fl;
+}
 
 /*
  * Map an allocation size to a freelist index, or -1 if not served.
@@ -65,8 +95,7 @@ _npy_freelist_index(int basicsize)
 
 /*
  * Try to pop an object from the freelist for the given size.
- * Returns a raw pointer with undefined contents (caller must
- * call PyObject_Init), or NULL if the freelist is empty.
+ * Returns a raw pointer (caller must initialize), or NULL if empty.
  */
 static inline void *
 npy_scalar_freelist_pop(int basicsize)
@@ -75,7 +104,11 @@ npy_scalar_freelist_pop(int basicsize)
     if (idx < 0) {
         return NULL;
     }
-    npy_scalar_freelist *fl = &_npy_scalar_freelists[idx];
+    npy_scalar_freelists *fls = _npy_get_freelists();
+    if (NPY_UNLIKELY(fls == NULL)) {
+        return NULL;
+    }
+    npy_scalar_freelist *fl = &fls->freelists[idx];
     void *obj = fl->head;
     if (obj != NULL) {
         fl->head = *(void **)obj;
@@ -93,10 +126,17 @@ static inline int
 npy_scalar_freelist_push(int basicsize, void *obj)
 {
     int idx = _npy_freelist_index(basicsize);
-    if (idx < 0 || _npy_scalar_freelists[idx].size >= NPY_SCALAR_FREELIST_SIZE) {
+    if (idx < 0) {
         return 0;
     }
-    npy_scalar_freelist *fl = &_npy_scalar_freelists[idx];
+    npy_scalar_freelists *fls = _npy_get_freelists();
+    if (NPY_UNLIKELY(fls == NULL)) {
+        return 0;
+    }
+    npy_scalar_freelist *fl = &fls->freelists[idx];
+    if (fl->size >= NPY_SCALAR_FREELIST_SIZE) {
+        return 0;
+    }
     *(void **)obj = fl->head;
     fl->head = obj;
     fl->size++;

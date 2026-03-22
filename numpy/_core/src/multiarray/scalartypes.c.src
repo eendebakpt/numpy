@@ -41,6 +41,9 @@
 #include "array_api_standard.h"
 #include "npy_freelist.h"
 
+/* Definition of the TSS key for per-thread scalar freelists */
+Py_tss_t _npy_freelist_tss_key = Py_tss_NEEDS_INIT;
+
 #include <stdlib.h>
 
 #include "binop_override.h"
@@ -91,10 +94,16 @@ gentype_alloc(PyTypeObject *type, Py_ssize_t nitems)
          * Fixed-size numeric scalar: try the freelist first.
          * The freelist is indexed by tp_basicsize, so all types with the
          * same basicsize share one freelist (e.g., int64, uint64, float64).
+         *
+         * No memset needed: all callers either overwrite the data portion
+         * completely (PyArray_Scalar via copyswap) or zero it explicitly
+         * (the arrtype_new functions for the no-argument case).
+         *
+         * PyObject_Init is required to set ob_type (may differ from the
+         * previous freelist occupant) and reset the refcount.
          */
         obj = (PyObject *)npy_scalar_freelist_pop(type->tp_basicsize);
         if (obj != NULL) {
-            memset(obj, 0, type->tp_basicsize);
             PyObject_Init(obj, type);
             return obj;
         }
@@ -4452,6 +4461,7 @@ static void init_basetypes(void);
 NPY_NO_EXPORT void
 initialize_numeric_types(void)
 {
+    npy_freelist_init();
     init_basetypes();
     PyGenericArrType_Type.tp_dealloc = (destructor)gentype_dealloc;
     PyGenericArrType_Type.tp_as_number = &gentype_as_number;
