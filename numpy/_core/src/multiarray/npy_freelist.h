@@ -31,7 +31,18 @@
  * We use three freelists, one per size class.
  */
 #define NPY_SCALAR_FREELIST_SIZE 40
-#define NPY_NUM_SCALAR_FREELISTS 3
+
+/*
+ * Freelist slots are indexed by (basicsize - 40) / 8:
+ *   basicsize 40 -> index 0  (bool, int8..64, uint8..64, float16..64, complex64)
+ *   basicsize 48 -> index 1  (longdouble, complex128)
+ *   basicsize 56 -> index 2  (unused, kept as padding)
+ *   basicsize 64 -> index 3  (clongdouble)
+ */
+#define NPY_SCALAR_FREELIST_MINSIZE 40
+#define NPY_SCALAR_FREELIST_MAXSIZE 64
+#define NPY_NUM_SCALAR_FREELISTS \
+    ((NPY_SCALAR_FREELIST_MAXSIZE - NPY_SCALAR_FREELIST_MINSIZE) / 8 + 1)
 
 typedef struct {
     void *head;      /* singly-linked list of free objects */
@@ -41,9 +52,6 @@ typedef struct {
 typedef struct {
     npy_scalar_freelist freelists[NPY_NUM_SCALAR_FREELISTS];
 } npy_scalar_freelists;
-
-/* Allocation sizes served by each freelist slot. */
-static const int _npy_freelist_sizes[NPY_NUM_SCALAR_FREELISTS] = {40, 48, 64};
 
 /*
  * Thread-specific key for per-thread freelists.
@@ -85,12 +93,13 @@ _npy_get_freelists(void)
 static inline int
 _npy_freelist_index(int basicsize)
 {
-    for (int i = 0; i < NPY_NUM_SCALAR_FREELISTS; i++) {
-        if (basicsize == _npy_freelist_sizes[i]) {
-            return i;
-        }
+    assert(basicsize >= NPY_SCALAR_FREELIST_MINSIZE);
+    assert(basicsize % 8 == 0);
+    unsigned int idx = (unsigned int)(basicsize - NPY_SCALAR_FREELIST_MINSIZE) / 8;
+    if (idx >= NPY_NUM_SCALAR_FREELISTS) {
+        return -1;
     }
-    return -1;
+    return (int)idx;
 }
 
 /*

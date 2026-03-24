@@ -98,13 +98,33 @@ gentype_alloc(PyTypeObject *type, Py_ssize_t nitems)
          * No memset needed: all callers either overwrite the data portion
          * completely (PyArray_Scalar via copyswap) or zero it explicitly
          * (the arrtype_new functions for the no-argument case).
-         *
-         * PyObject_Init is required to set ob_type (may differ from the
-         * previous freelist occupant) and reset the refcount.
          */
         obj = (PyObject *)npy_scalar_freelist_pop(type->tp_basicsize);
         if (obj != NULL) {
-            PyObject_Init(obj, type);
+            /*
+             * Re-initialize the object from the freelist.  The freelist
+             * uses ob_tid as the linked-list pointer, so it must be
+             * restored.  ob_ref_local was 0 after dealloc and needs to
+             * be set to 1.  ob_type is still valid from the previous
+             * user of this slot, but may be a different type with the
+             * same basicsize, so we always set it.
+             *
+             * On free-threading builds we do this inline to avoid a
+             * function call into libpython (PyObject_Init) which would
+             * trigger expensive __tls_get_addr calls.  The scalar types
+             * are immortal (not heap types), so Py_INCREF(type) is a
+             * no-op and can be skipped.
+             */
+#ifdef Py_GIL_DISABLED
+            assert(_Py_IsImmortal((PyObject *)type));
+            obj->ob_tid = _Py_ThreadId();
+            obj->ob_ref_local = 1;
+            obj->ob_ref_shared = 0;
+            Py_SET_TYPE(obj, type);
+#else
+            Py_SET_TYPE(obj, type);
+            Py_SET_REFCNT(obj, 1);
+#endif
             return obj;
         }
     }
