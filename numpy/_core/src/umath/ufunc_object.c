@@ -2173,31 +2173,10 @@ PyUFunc_GenericFunctionInternal(PyUFuncObject *ufunc,
     npy_intp default_op_out_flags;
     npy_uint32 op_flags[NPY_MAXARGS];
 
-    /* These parameters come from a TLS global */
+    /* These parameters come from a TLS global (fetched lazily below) */
     int buffersize = 0, errormask = 0;
 
     NPY_UF_DBG_PRINT1("\nEvaluating ufunc %s\n", ufunc_get_name_cstr(ufunc));
-
-    /* Get the buffersize and errormask */
-    if (_get_bufsize_errmask(&buffersize, &errormask) < 0) {
-        return -1;
-    }
-
-    if (wheremask != NULL) {
-        /* Set up the flags. */
-        default_op_out_flags = NPY_ITER_NO_SUBTYPE |
-                               NPY_ITER_WRITEMASKED |
-                               NPY_UFUNC_DEFAULT_OUTPUT_FLAGS;
-        _ufunc_setup_flags(ufunc, NPY_UFUNC_DEFAULT_INPUT_FLAGS,
-                           default_op_out_flags, op_flags);
-    }
-    else {
-        /* Set up the flags. */
-        default_op_out_flags = NPY_ITER_WRITEONLY |
-                               NPY_UFUNC_DEFAULT_OUTPUT_FLAGS;
-        _ufunc_setup_flags(ufunc, NPY_UFUNC_DEFAULT_INPUT_FLAGS,
-                           default_op_out_flags, op_flags);
-    }
 
     /* Final preparation of the arraymethod call */
     PyArrayMethod_Context context;
@@ -2208,6 +2187,16 @@ PyUFunc_GenericFunctionInternal(PyUFuncObject *ufunc,
     /* Do the ufunc loop */
     if (wheremask != NULL) {
         NPY_UF_DBG_PRINT("Executing masked inner loop\n");
+
+        if (_get_bufsize_errmask(&buffersize, &errormask) < 0) {
+            return -1;
+        }
+        /* Set up the flags. */
+        default_op_out_flags = NPY_ITER_NO_SUBTYPE |
+                               NPY_ITER_WRITEMASKED |
+                               NPY_UFUNC_DEFAULT_OUTPUT_FLAGS;
+        _ufunc_setup_flags(ufunc, NPY_UFUNC_DEFAULT_INPUT_FLAGS,
+                           default_op_out_flags, op_flags);
 
         if (nop + 1 > NPY_MAXARGS) {
             PyErr_SetString(PyExc_ValueError,
@@ -2227,13 +2216,23 @@ PyUFunc_GenericFunctionInternal(PyUFuncObject *ufunc,
         /*
          * This checks whether a trivial loop is ok, making copies of
          * scalar and one dimensional operands if that should help.
+         * Pass buffersize=0 here: the trivial check only uses it for
+         * the rare unaligned-copy path, and 0 means "no copies".
+         * If the trivial loop succeeds we avoid fetching the TLS errstate.
          */
         int trivial_ok = check_for_trivial_loop(ufuncimpl,
-                op, operation_descrs, casting, buffersize);
+                op, operation_descrs, casting, /*buffersize=*/0);
         if (trivial_ok < 0) {
             return -1;
         }
         if (trivial_ok && context.method->nout == 1) {
+            /*
+             * Fetch errormask lazily — only needed for FP error checking
+             * at the end of the trivial loop.
+             */
+            if (_get_bufsize_errmask(NULL, &errormask) < 0) {
+                return -1;
+            }
             /* Try to handle everything without using the (heavy) iterator */
             int retval = try_trivial_single_output_loop(&context,
                     op, order, errormask);
@@ -2241,6 +2240,18 @@ PyUFunc_GenericFunctionInternal(PyUFuncObject *ufunc,
                 return retval;
             }
         }
+
+        /* Fall back to the full iterator path */
+        if (buffersize == 0) {
+            if (_get_bufsize_errmask(&buffersize, &errormask) < 0) {
+                return -1;
+            }
+        }
+        /* Set up the flags. */
+        default_op_out_flags = NPY_ITER_WRITEONLY |
+                               NPY_UFUNC_DEFAULT_OUTPUT_FLAGS;
+        _ufunc_setup_flags(ufunc, NPY_UFUNC_DEFAULT_INPUT_FLAGS,
+                           default_op_out_flags, op_flags);
 
         return execute_ufunc_loop(&context, 0,
                 op, order, buffersize, casting, op_flags, errormask);
