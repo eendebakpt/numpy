@@ -39,6 +39,10 @@
 #include "npy_static_data.h"
 #include "multiarraymodule.h"
 #include "array_api_standard.h"
+#include "npy_freelist.h"
+
+/* Definition of the TSS key for per-thread scalar freelists */
+Py_tss_t _npy_freelist_tss_key = Py_tss_NEEDS_INIT;
 
 #include <stdlib.h>
 
@@ -84,17 +88,53 @@ static PyObject *
 gentype_alloc(PyTypeObject *type, Py_ssize_t nitems)
 {
     PyObject *obj;
-    const size_t size = _PyObject_VAR_SIZE(type, nitems + 1);
 
+    if (type->tp_itemsize == 0) {
+        /*
+         * Fixed-size numeric scalar: try the freelist first.
+         * The freelist is indexed by tp_basicsize, so all types with the
+         * same basicsize share one freelist (e.g., int64, uint64, float64).
+         *
+         * No memset needed: all callers either overwrite the data portion
+         * completely (PyArray_Scalar via copyswap) or zero it explicitly
+         * (the arrtype_new functions for the no-argument case).
+         */
+        obj = (PyObject *)npy_scalar_freelist_pop(type->tp_basicsize);
+        if (obj != NULL) {
+            /*
+             * Re-initialize the object from the freelist.  The freelist
+             * uses ob_tid as the linked-list pointer, so it must be
+             * restored.  ob_ref_local was 0 after dealloc and needs to
+             * be set to 1.  ob_type is still valid from the previous
+             * user of this slot, but may be a different type with the
+             * same basicsize, so we always set it.
+             *
+             * On free-threading builds we do this inline to avoid a
+             * function call into libpython (PyObject_Init) which would
+             * trigger expensive __tls_get_addr calls.  The scalar types
+             * are immortal (not heap types), so Py_INCREF(type) is a
+             * no-op and can be skipped.
+             */
+#ifdef Py_GIL_DISABLED
+            assert(_Py_IsImmortal((PyObject *)type));
+            obj->ob_tid = _Py_ThreadId();
+            obj->ob_ref_local = 1;
+            obj->ob_ref_shared = 0;
+            Py_SET_TYPE(obj, type);
+#else
+            Py_SET_TYPE(obj, type);
+            Py_SET_REFCNT(obj, 1);
+#endif
+            return obj;
+        }
+    }
+
+    const size_t size = _PyObject_VAR_SIZE(type, nitems + 1);
     obj = (PyObject *)PyObject_Malloc(size);
     if (obj == NULL) {
         PyErr_NoMemory();
         return NULL;
     }
-    /*
-     * If we don't need to zero memory, we could use
-     * PyObject_{New, NewVar} for this whole function.
-     */
     memset(obj, 0, size);
     if (type->tp_itemsize == 0) {
         PyObject_Init(obj, type);
@@ -115,11 +155,19 @@ static void
 gentype_free(PyObject *v)
 {
     /*
-     * have an explicit tp_free to enforce inheritance from it.
+     * Have an explicit tp_free to enforce inheritance from it.
      * PyObject_Free is also the tp_free of PyBaseObject so python does not
      * COPYSLOT it, instead it takes the next parent PyInt which has a
-     * different allocator
+     * different allocator.
+     *
+     * For fixed-size numeric scalars, try to recycle via the freelist
+     * to avoid repeated malloc/free in tight scalar loops.
      */
+    PyTypeObject *type = Py_TYPE(v);
+    if (type->tp_itemsize == 0
+            && npy_scalar_freelist_push(type->tp_basicsize, (void *)v)) {
+        return;
+    }
     PyObject_Free(v);
 }
 
@@ -4433,6 +4481,7 @@ static void init_basetypes(void);
 NPY_NO_EXPORT void
 initialize_numeric_types(void)
 {
+    npy_freelist_init();
     init_basetypes();
     PyGenericArrType_Type.tp_dealloc = (destructor)gentype_dealloc;
     PyGenericArrType_Type.tp_as_number = &gentype_as_number;
