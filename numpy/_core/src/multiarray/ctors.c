@@ -4151,33 +4151,27 @@ _array_fill_strides(npy_intp *strides, npy_intp const *dims, int nd, size_t item
                     int inflag, int *objflags)
 {
     int i;
-    npy_bool not_cf_contig = 0;
-    npy_bool nod = 0; /* A dim != 1 was found */
+    int non_unit_dims = 0;
+    npy_bool has_zero_dim = 0;
 
-    /* Check if new array is both F- and C-contiguous */
-    for (i = 0; i < nd; i++) {
-        if (dims[i] != 1) {
-            if (nod) {
-                not_cf_contig = 1;
-                break;
-            }
-            nod = 1;
-        }
-    }
-
-    /* Only make Fortran strides if not contiguous as well */
+    /*
+     * Fill strides and simultaneously determine contiguity.
+     * The array is both C- and F-contiguous when at most one
+     * dimension has size != 1 and no dimension has size 0.
+     */
     if ((inflag & (NPY_ARRAY_F_CONTIGUOUS|NPY_ARRAY_C_CONTIGUOUS)) ==
                                             NPY_ARRAY_F_CONTIGUOUS) {
         for (i = 0; i < nd; i++) {
             strides[i] = itemsize;
+            non_unit_dims += (dims[i] != 1);
             if (dims[i]) {
                 itemsize *= dims[i];
             }
             else {
-                not_cf_contig = 0;
+                has_zero_dim = 1;
             }
         }
-        if (not_cf_contig) {
+        if (non_unit_dims > 1 && !has_zero_dim) {
             *objflags = ((*objflags)|NPY_ARRAY_F_CONTIGUOUS) &
                                             ~NPY_ARRAY_C_CONTIGUOUS;
         }
@@ -4188,14 +4182,15 @@ _array_fill_strides(npy_intp *strides, npy_intp const *dims, int nd, size_t item
     else {
         for (i = nd - 1; i >= 0; i--) {
             strides[i] = itemsize;
+            non_unit_dims += (dims[i] != 1);
             if (dims[i]) {
                 itemsize *= dims[i];
             }
             else {
-                not_cf_contig = 0;
+                has_zero_dim = 1;
             }
         }
-        if (not_cf_contig) {
+        if (non_unit_dims > 1 && !has_zero_dim) {
             *objflags = ((*objflags)|NPY_ARRAY_C_CONTIGUOUS) &
                                             ~NPY_ARRAY_F_CONTIGUOUS;
         }
@@ -4203,5 +4198,4 @@ _array_fill_strides(npy_intp *strides, npy_intp const *dims, int nd, size_t item
             *objflags |= (NPY_ARRAY_C_CONTIGUOUS|NPY_ARRAY_F_CONTIGUOUS);
         }
     }
-    return;
 }
