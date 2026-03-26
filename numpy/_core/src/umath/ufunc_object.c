@@ -4684,6 +4684,126 @@ ufunc_generic_fastcall(PyUFuncObject *ufunc,
                 Py_INCREF(operand_DTypes[i]);
             }
 
+            /*
+             * Super-fast path for nin==1: resolve dispatch, descriptors,
+             * and loop execution in one shot, bypassing promote_and_get_ufuncimpl,
+             * resolve_descriptors, and GenericFunctionInternal entirely.
+             *
+             * Requirements: contiguous aligned input, matching dtype singleton,
+             * dispatch cache hit.
+             */
+            if (nin == 1
+                    && PyArray_ISCONTIGUOUS((PyArrayObject *)args[0])
+                    && PyArray_ISALIGNED((PyArrayObject *)args[0])) {
+
+                PyArray_Descr *in_descr = PyArray_DESCR(operands[0]);
+                PyArray_DTypeMeta *in_DType = operand_DTypes[0];
+                PyArray_Descr *expected = in_DType->singleton;
+
+                if (in_descr == expected) {
+                    /* Single hash lookup: get method + output dtype */
+                    PyArray_DTypeMeta *op_dt[2] = {in_DType, NULL};
+                    PyObject *info = PyArrayIdentityHash_GetItem(
+                            (PyArrayIdentityHash *)ufunc->_dispatch_cache,
+                            (PyObject **)op_dt);
+                    PyArrayMethodObject *ufuncimpl;
+
+                    if (info != NULL && PyObject_TypeCheck(
+                            PyTuple_GET_ITEM(info, 1), &PyArrayMethod_Type)) {
+                        ufuncimpl = (PyArrayMethodObject *)PyTuple_GET_ITEM(info, 1);
+                    }
+                    else {
+                        goto happy_path_slow;
+                    }
+
+                    if (ufuncimpl->resolve_descriptors_with_scalars != NULL) {
+                        goto happy_path_slow;
+                    }
+
+                    PyObject *all_dtypes = PyTuple_GET_ITEM(info, 0);
+                    PyArray_DTypeMeta *out_DType = (PyArray_DTypeMeta *)PyTuple_GET_ITEM(all_dtypes, 1);
+                    PyArray_Descr *out_descr = out_DType->singleton;
+                    if (out_descr == NULL) {
+                        goto happy_path_slow;
+                    }
+
+                    /* Allocate output array */
+                    Py_INCREF(out_descr);
+                    operands[1] = (PyArrayObject *)PyArray_NewFromDescr(
+                            &PyArray_Type, out_descr,
+                            PyArray_NDIM(operands[0]),
+                            PyArray_SHAPE(operands[0]),
+                            NULL, NULL, 0, NULL);
+                    if (operands[1] == NULL) {
+                        goto fail;
+                    }
+
+                    /* Get and call the strided loop directly */
+                    npy_intp count = PyArray_SIZE(operands[0]);
+                    npy_intp strides[2] = {in_descr->elsize, out_descr->elsize};
+                    char *data[2] = {
+                        PyArray_BYTES(operands[0]),
+                        PyArray_BYTES(operands[1])
+                    };
+
+                    PyArrayMethod_Context context;
+                    PyArray_Descr *descrs[2] = {in_descr, out_descr};
+                    NPY_context_init(&context, descrs);
+                    context.caller = (PyObject *)ufunc;
+                    context.method = ufuncimpl;
+
+                    PyArrayMethod_StridedLoop *strided_loop;
+                    NpyAuxData *auxdata = NULL;
+                    NPY_ARRAYMETHOD_FLAGS flags = 0;
+                    if (ufuncimpl->get_strided_loop(
+                            &context, 1, 0, strides,
+                            &strided_loop, &auxdata, &flags) < 0) {
+                        goto fail;
+                    }
+
+                    if (!(flags & NPY_METH_NO_FLOATINGPOINT_ERRORS)) {
+                        npy_clear_floatstatus_barrier((char *)&context);
+                    }
+
+                    int res = strided_loop(
+                            &context, data, &count, strides, auxdata);
+                    NPY_AUXDATA_FREE(auxdata);
+
+                    if (res == 0 && PyErr_Occurred()) {
+                        res = -1;
+                    }
+                    if (res == 0 && !(flags & NPY_METH_NO_FLOATINGPOINT_ERRORS)) {
+                        int errormask = 0;
+                        if (_get_bufsize_errmask(NULL, &errormask) < 0) {
+                            goto fail;
+                        }
+                        res = _check_ufunc_fperr(errormask,
+                                ufunc_get_name_cstr(ufunc));
+                    }
+                    if (res != 0) {
+                        goto fail;
+                    }
+
+                    /* Clean up inputs and dispatch state */
+                    for (int i = 0; i < nop; i++) {
+                        Py_XDECREF(signature[i]);
+                        Py_XDECREF(operand_DTypes[i]);
+                    }
+                    for (int i = 0; i < nin; i++) {
+                        Py_DECREF(operands[i]);
+                    }
+
+                    PyObject *result = (PyObject *)operands[1];
+                    npy_free_workspace(scratch_objs);
+                    if (return_scalar
+                            && PyArray_NDIM((PyArrayObject *)result) == 0) {
+                        return PyArray_Return((PyArrayObject *)result);
+                    }
+                    return result;
+                }
+            }
+
+          happy_path_slow: ;
             PyArrayMethodObject *ufuncimpl = promote_and_get_ufuncimpl(ufunc,
                     operands, signature,
                     operand_DTypes, NPY_FALSE,
