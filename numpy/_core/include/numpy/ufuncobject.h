@@ -232,6 +232,15 @@ typedef struct _tagPyUFuncObject {
          */
         PyUFunc_ProcessCoreDimsFunc *process_core_dims_func;
     #endif
+        /*
+         * Inline dispatch cache: avoids the hash table lookup for the
+         * most common case where the same DType(s) are used repeatedly.
+         * Stores nargs DType pointers and the resolved info tuple.
+         * Size 4 covers ufuncs up to 3-in/1-out (e.g. clip).
+         */
+#define _NPY_IDCACHE_MAXARGS 4
+        PyObject *_dispatch_idcache_dtype[_NPY_IDCACHE_MAXARGS];
+        PyObject *_dispatch_idcache_info;
 } PyUFuncObject_fields;
 
 typedef PyUFuncObject_fields PyUFuncObject;

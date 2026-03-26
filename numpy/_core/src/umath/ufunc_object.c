@@ -5002,6 +5002,9 @@ PyUFunc_FromFuncAndDataAndSignatureAndIdentity(PyUFuncGenericFunction *func, voi
 
     ufunc->process_core_dims_func = NULL;
 
+    memset(ufunc->_dispatch_idcache_dtype, 0, sizeof(ufunc->_dispatch_idcache_dtype));
+    ufunc->_dispatch_idcache_info = NULL;
+
     ufunc->op_flags = NULL;
     ufunc->_loops = NULL;
     if (nin + nout != 0) {

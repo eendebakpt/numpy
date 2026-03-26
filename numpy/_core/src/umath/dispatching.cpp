@@ -845,18 +845,43 @@ promote_and_get_info_and_ufuncimpl(PyUFuncObject *ufunc,
 {
     /*
      * Fetch the dispatching info which consists of the implementation and
-     * the DType signature tuple.  There are three steps:
+     * the DType signature tuple.  There are four steps:
      *
-     * 1. Check the cache.
+     * 0. Check the inline (direct-mapped) cache on the ufunc.
+     * 1. Check the hash table cache.
      * 2. Check all registered loops/promoters to find the best match.
      * 3. Fall back to the legacy implementation if no match was found.
      */
-    PyObject *info = PyArrayIdentityHash_GetItem(
+
+    /* Step 0: inline identity cache — avoids hash table for repeated dtypes */
+    int nargs = ufunc->nargs;
+    PyObject *info = ufunc->_dispatch_idcache_info;
+    if (info != NULL && nargs <= _NPY_IDCACHE_MAXARGS) {
+        int match = 1;
+        for (int i = 0; i < nargs; i++) {
+            if (ufunc->_dispatch_idcache_dtype[i] != (PyObject *)op_dtypes[i]) {
+                match = 0;
+                break;
+            }
+        }
+        if (match) {
+            return info;
+        }
+    }
+
+    /* Step 1: hash table cache */
+    info = PyArrayIdentityHash_GetItem(
             (PyArrayIdentityHash *)ufunc->_dispatch_cache,
             (PyObject **)op_dtypes);
     if (info != NULL && PyObject_TypeCheck(
             PyTuple_GET_ITEM(info, 1), &PyArrayMethod_Type)) {
-        /* Found the ArrayMethod and NOT a promoter: return it */
+        /* Found the ArrayMethod and NOT a promoter: update inline cache */
+        if (nargs <= _NPY_IDCACHE_MAXARGS) {
+            for (int i = 0; i < nargs; i++) {
+                ufunc->_dispatch_idcache_dtype[i] = (PyObject *)op_dtypes[i];
+            }
+            ufunc->_dispatch_idcache_info = info;
+        }
         return info;
     }
 
@@ -1039,34 +1064,46 @@ promote_and_get_ufuncimpl(PyUFuncObject *ufunc,
     /*
      * Get the actual DTypes we operate with by setting op_dtypes[i] from
      * signature[i].
+     *
+     * Fast path: when no signature entries are set (the common case for
+     * calls without dtype= or signature= kwargs), we only need to clear
+     * output op_dtypes and check for non-legacy dtypes.
      */
+    npy_bool has_signature = NPY_FALSE;
     for (int i = 0; i < nargs; i++) {
         if (signature[i] != NULL) {
-            /*
-             * ignore the operand input, we cannot overwrite signature yet
-             * since it is fixed (cannot be promoted!)
-             */
-            Py_INCREF(signature[i]);
-            Py_XSETREF(op_dtypes[i], signature[i]);
-            assert(i >= ufunc->nin || !NPY_DT_is_abstract(signature[i]));
+            has_signature = NPY_TRUE;
+            break;
         }
-        else if (i >= nin) {
-            /*
-             * We currently just ignore outputs if not in signature, this will
-             * always give the/a correct result (limits registering specialized
-             * loops which include the cast).
-             * (See also comment in resolve_implementation_info.)
-             */
-            Py_CLEAR(op_dtypes[i]);
+    }
+
+    if (has_signature) {
+        for (int i = 0; i < nargs; i++) {
+            if (signature[i] != NULL) {
+                Py_INCREF(signature[i]);
+                Py_XSETREF(op_dtypes[i], signature[i]);
+                assert(i >= ufunc->nin || !NPY_DT_is_abstract(signature[i]));
+            }
+            else if (i >= nin) {
+                Py_CLEAR(op_dtypes[i]);
+            }
+            if (op_dtypes[i] != NULL && !NPY_DT_is_legacy(op_dtypes[i]) && (
+                    signature[i] != NULL ||
+                    !(PyArray_FLAGS(ops[i]) & NPY_ARRAY_WAS_PYTHON_LITERAL))) {
+                legacy_promotion_is_possible = NPY_FALSE;
+            }
         }
-        /*
-         * If the op_dtype ends up being a non-legacy one, then we cannot use
-         * legacy promotion (unless this is a python scalar).
-         */
-        if (op_dtypes[i] != NULL && !NPY_DT_is_legacy(op_dtypes[i]) && (
-                signature[i] != NULL ||  // signature cannot be a pyscalar
-                !(PyArray_FLAGS(ops[i]) & NPY_ARRAY_WAS_PYTHON_LITERAL))) {
-            legacy_promotion_is_possible = NPY_FALSE;
+    }
+    else {
+        /* No signature constraints: just clear output dtypes and check legacy */
+        for (int i = 0; i < nargs; i++) {
+            if (i >= nin) {
+                Py_CLEAR(op_dtypes[i]);
+            }
+            else if (op_dtypes[i] != NULL && !NPY_DT_is_legacy(op_dtypes[i])
+                    && !(PyArray_FLAGS(ops[i]) & NPY_ARRAY_WAS_PYTHON_LITERAL)) {
+                legacy_promotion_is_possible = NPY_FALSE;
+            }
         }
     }
 
