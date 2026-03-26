@@ -59,6 +59,44 @@
 
 #define PROMOTION_DEBUG_TRACING 0
 
+#ifdef Py_GIL_DISABLED
+#include <atomic>
+#endif
+
+/*
+ * Load/store the single-entry dispatch cache (`_dispatch_l1_info`).
+ * The stored info tuple is immutable and owned by `ufunc->_loops` (which
+ * only grows), so a borrowed pointer stays valid for the lifetime of the
+ * ufunc.  On free-threading builds use acquire/release so that a reader
+ * observes the fully constructed tuple published by another thread (the
+ * same ordering the hash table cache uses).
+ */
+static inline PyObject *
+dispatch_l1_load(PyUFuncObject *ufunc)
+{
+#ifdef Py_GIL_DISABLED
+    return std::atomic_load_explicit(
+            reinterpret_cast<std::atomic<PyObject *> *>(
+                    &ufunc->_dispatch_l1_info),
+            std::memory_order_acquire);
+#else
+    return (PyObject *)ufunc->_dispatch_l1_info;
+#endif
+}
+
+static inline void
+dispatch_l1_store(PyUFuncObject *ufunc, PyObject *info)
+{
+#ifdef Py_GIL_DISABLED
+    std::atomic_store_explicit(
+            reinterpret_cast<std::atomic<PyObject *> *>(
+                    &ufunc->_dispatch_l1_info),
+            info, std::memory_order_release);
+#else
+    ufunc->_dispatch_l1_info = info;
+#endif
+}
+
 
 /* forward declaration */
 static inline PyObject *
@@ -955,18 +993,78 @@ promote_and_get_info_and_ufuncimpl(PyUFuncObject *ufunc,
 {
     /*
      * Fetch the dispatching info which consists of the implementation and
-     * the DType signature tuple.  There are three steps:
+     * the DType signature tuple.  There are four steps:
      *
-     * 1. Check the cache.
+     * 0. Check the single-entry cache of the last used resolution.
+     * 1. Check the hash table cache.
      * 2. Check all registered loops/promoters to find the best match.
      * 3. Fall back to the legacy implementation if no match was found.
      */
-    PyObject *info = PyArrayIdentityHash_GetItem(
+    int nin = ufunc->nin;
+    int nargs = ufunc->nargs;
+
+    /*
+     * Step 0: check the most recently used resolution.  The cache holds a
+     * single (borrowed) pointer to an info tuple whose DType tuple served
+     * as the hash table key, and is only used for keys with all output
+     * DTypes unspecified (NULL), so a match below implies the current key
+     * is identical to the key the info was found under.  Storing one
+     * pointer keeps the cache lock-free on free-threading builds: the
+     * info tuple is immutable, so a stale read is still consistent.
+     */
+    PyObject *info = dispatch_l1_load(ufunc);
+    if (info != NULL) {
+        PyObject *cached_dtypes = PyTuple_GET_ITEM(info, 0);
+        int match = 1;
+        for (int i = 0; i < nin; i++) {
+            if ((PyObject *)op_dtypes[i]
+                    != PyTuple_GET_ITEM(cached_dtypes, i)) {
+                match = 0;
+                break;
+            }
+        }
+        if (match) {
+            for (int i = nin; i < nargs; i++) {
+                if (op_dtypes[i] != NULL) {
+                    match = 0;
+                    break;
+                }
+            }
+            if (match) {
+                return info;
+            }
+        }
+    }
+
+    /* Step 1: hash table cache */
+    info = PyArrayIdentityHash_GetItem(
             (PyArrayIdentityHash *)ufunc->_dispatch_cache,
             (PyObject **)op_dtypes);
     if (info != NULL && PyObject_TypeCheck(
             PyTuple_GET_ITEM(info, 1), &PyArrayMethod_Type)) {
-        /* Found the ArrayMethod and NOT a promoter: return it */
+        /*
+         * Found the ArrayMethod and NOT a promoter.  Remember it in the
+         * single-entry cache, but only for keys whose output DTypes are
+         * all unspecified and whose input DTypes equal the resolved ones
+         * (i.e. the key can be reconstructed from the info itself, see
+         * the cache check above).
+         */
+        PyObject *all_dtypes = PyTuple_GET_ITEM(info, 0);
+        int cacheable = 1;
+        for (int i = 0; i < nin; i++) {
+            if ((PyObject *)op_dtypes[i] != PyTuple_GET_ITEM(all_dtypes, i)) {
+                cacheable = 0;
+                break;
+            }
+        }
+        for (int i = nin; cacheable && i < nargs; i++) {
+            if (op_dtypes[i] != NULL) {
+                cacheable = 0;
+            }
+        }
+        if (cacheable) {
+            dispatch_l1_store(ufunc, info);
+        }
         return info;
     }
 
@@ -1149,34 +1247,46 @@ promote_and_get_ufuncimpl(PyUFuncObject *ufunc,
     /*
      * Get the actual DTypes we operate with by setting op_dtypes[i] from
      * signature[i].
+     *
+     * Fast path: when no signature entries are set (the common case for
+     * calls without dtype= or signature= kwargs), we only need to clear
+     * output op_dtypes and check for non-legacy dtypes.
      */
+    npy_bool has_signature = NPY_FALSE;
     for (int i = 0; i < nargs; i++) {
         if (signature[i] != NULL) {
-            /*
-             * ignore the operand input, we cannot overwrite signature yet
-             * since it is fixed (cannot be promoted!)
-             */
-            Py_INCREF(signature[i]);
-            Py_XSETREF(op_dtypes[i], signature[i]);
-            assert(i >= ufunc->nin || !NPY_DT_is_abstract(signature[i]));
+            has_signature = NPY_TRUE;
+            break;
         }
-        else if (i >= nin) {
-            /*
-             * We currently just ignore outputs if not in signature, this will
-             * always give the/a correct result (limits registering specialized
-             * loops which include the cast).
-             * (See also comment in resolve_implementation_info.)
-             */
-            Py_CLEAR(op_dtypes[i]);
+    }
+
+    if (has_signature) {
+        for (int i = 0; i < nargs; i++) {
+            if (signature[i] != NULL) {
+                Py_INCREF(signature[i]);
+                Py_XSETREF(op_dtypes[i], signature[i]);
+                assert(i >= ufunc->nin || !NPY_DT_is_abstract(signature[i]));
+            }
+            else if (i >= nin) {
+                Py_CLEAR(op_dtypes[i]);
+            }
+            if (op_dtypes[i] != NULL && !NPY_DT_is_legacy(op_dtypes[i]) && (
+                    signature[i] != NULL ||
+                    !(PyArray_FLAGS(ops[i]) & NPY_ARRAY_WAS_PYTHON_LITERAL))) {
+                legacy_promotion_is_possible = NPY_FALSE;
+            }
         }
-        /*
-         * If the op_dtype ends up being a non-legacy one, then we cannot use
-         * legacy promotion (unless this is a python scalar).
-         */
-        if (op_dtypes[i] != NULL && !NPY_DT_is_legacy(op_dtypes[i]) && (
-                signature[i] != NULL ||  // signature cannot be a pyscalar
-                !(PyArray_FLAGS(ops[i]) & NPY_ARRAY_WAS_PYTHON_LITERAL))) {
-            legacy_promotion_is_possible = NPY_FALSE;
+    }
+    else {
+        /* No signature constraints: just clear output dtypes and check legacy */
+        for (int i = 0; i < nargs; i++) {
+            if (i >= nin) {
+                Py_CLEAR(op_dtypes[i]);
+            }
+            else if (op_dtypes[i] != NULL && !NPY_DT_is_legacy(op_dtypes[i])
+                    && !(PyArray_FLAGS(ops[i]) & NPY_ARRAY_WAS_PYTHON_LITERAL)) {
+                legacy_promotion_is_possible = NPY_FALSE;
+            }
         }
     }
 

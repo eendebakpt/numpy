@@ -236,6 +236,13 @@ typedef struct _tagPyUFuncObject {
          */
         PyUFunc_ProcessCoreDimsFunc *process_core_dims_func;
     #endif
+        /*
+         * Private: cache of the most recently used dispatch resolution
+         * (a borrowed reference to an entry of `_loops`, or NULL).
+         * Avoids the hash table lookup for the common case of repeated
+         * calls with the same DTypes.
+         */
+        void *_dispatch_l1_info;
 } PyUFuncObject_fields;
 
 
