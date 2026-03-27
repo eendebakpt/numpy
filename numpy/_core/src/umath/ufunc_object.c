@@ -4700,7 +4700,8 @@ ufunc_generic_fastcall(PyUFuncObject *ufunc,
                 PyArray_DTypeMeta *in_DType = operand_DTypes[0];
                 PyArray_Descr *expected = in_DType->singleton;
 
-                if (in_descr == expected) {
+                if (in_descr == expected
+                        && !PyDataType_REFCHK(in_descr)) {
                     /* Single hash lookup: get method + output dtype */
                     PyArray_DTypeMeta *op_dt[2] = {in_DType, NULL};
                     PyObject *info = PyArrayIdentityHash_GetItem(
@@ -4727,13 +4728,9 @@ ufunc_generic_fastcall(PyUFuncObject *ufunc,
                         goto happy_path_slow;
                     }
 
-                    /* Allocate output array */
-                    Py_INCREF(out_descr);
-                    operands[1] = (PyArrayObject *)PyArray_NewFromDescr(
-                            &PyArray_Type, out_descr,
-                            PyArray_NDIM(operands[0]),
-                            PyArray_SHAPE(operands[0]),
-                            NULL, NULL, 0, NULL);
+                    /* Allocate output array (fast path) */
+                    operands[1] = (PyArrayObject *)PyArray_NewLikeArray_fast(
+                            operands[0], out_descr);
                     if (operands[1] == NULL) {
                         goto fail;
                     }

@@ -11,6 +11,9 @@ PyArray_NewFromDescr(
         int flags, PyObject *obj);
 
 NPY_NO_EXPORT PyObject *
+PyArray_NewLikeArray_fast(PyArrayObject *input, PyArray_Descr *descr);
+
+NPY_NO_EXPORT PyObject *
 PyArray_NewFromDescrAndBase(
         PyTypeObject *subtype, PyArray_Descr *descr, int nd,
         npy_intp const *dims, npy_intp const *strides, void *data,

@@ -1004,6 +1004,86 @@ PyArray_NewFromDescr_int(
 }
 
 
+/*
+ * Fast array creation for the ufunc super-fast path.
+ * Creates a new contiguous array with the same shape as `input`.
+ * Does NOT steal a reference to descr.
+ *
+ * Skips: PyDataMem_GetHandler (uses default), subarray/unsized checks,
+ * UpdateFlags (flags are known), fill_strides (computed inline).
+ */
+NPY_NO_EXPORT PyObject *
+PyArray_NewLikeArray_fast(PyArrayObject *input, PyArray_Descr *descr)
+{
+    int nd = PyArray_NDIM(input);
+    npy_intp *dims = PyArray_DIMS(input);
+
+    PyArrayObject_fields *fa = (PyArrayObject_fields *)
+            PyArray_Type.tp_alloc(&PyArray_Type, 0);
+    if (fa == NULL) {
+        return NULL;
+    }
+
+    Py_INCREF(descr);
+    fa->descr = descr;
+    fa->nd = nd;
+    fa->_buffer_info = NULL;
+    fa->base = NULL;
+    fa->weakreflist = NULL;
+    fa->flags = NPY_ARRAY_DEFAULT | NPY_ARRAY_C_CONTIGUOUS
+              | NPY_ARRAY_F_CONTIGUOUS | NPY_ARRAY_OWNDATA;
+
+    npy_intp nbytes = descr->elsize;
+    if (nd > 0) {
+        fa->dimensions = npy_alloc_cache_dim(2 * nd);
+        if (fa->dimensions == NULL) {
+            PyErr_NoMemory();
+            Py_DECREF(fa);
+            return NULL;
+        }
+        fa->strides = fa->dimensions + nd;
+
+        /* Compute strides (C-contiguous) and total size */
+        for (int i = nd - 1; i >= 0; i--) {
+            fa->dimensions[i] = dims[i];
+            fa->strides[i] = nbytes;
+            nbytes *= dims[i];
+        }
+        /* Check if also F-contiguous (at most one dim != 1) */
+        int non_unit = 0;
+        for (int i = 0; i < nd; i++) {
+            non_unit += (dims[i] != 1);
+        }
+        if (non_unit > 1) {
+            fa->flags &= ~NPY_ARRAY_F_CONTIGUOUS;
+        }
+    }
+    else {
+        fa->dimensions = NULL;
+        fa->strides = NULL;
+    }
+
+    /* Use the default memory handler directly */
+    fa->mem_handler = PyDataMem_GetHandler();
+    if (fa->mem_handler == NULL) {
+        Py_DECREF(fa);
+        return NULL;
+    }
+    if (nbytes == 0) {
+        nbytes = 1;
+    }
+    fa->data = PyDataMem_UserNEW(nbytes, fa->mem_handler);
+    if (fa->data == NULL) {
+        raise_memory_error(nd, dims, descr);
+        Py_XDECREF(fa->mem_handler);
+        Py_DECREF(fa);
+        return NULL;
+    }
+
+    return (PyObject *)fa;
+}
+
+
 /*NUMPY_API
  * Generic new array creation routine.
  *
