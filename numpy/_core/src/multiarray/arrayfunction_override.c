@@ -511,7 +511,40 @@ dispatcher_vectorcall(PyArray_ArrayFunctionDispatcherObject *self,
     if (self->relevant_arg_func != NULL) {
         public_api = (PyObject *)self;
 
-        /* Typical path, need to call the relevant_arg_func and unpack them */
+        /*
+         * Fast path: if all positional args are exact ndarrays (or
+         * non-array-like types), no __array_function__ override is possible.
+         * Skip the expensive Python relevant_arg_func call and the
+         * get_implementing_args_and_methods check entirely.
+         *
+         * We also need to check keyword `out` args since they can be
+         * array subclasses. For simplicity, only take the fast path when
+         * there are no keyword arguments, or when all keyword values are
+         * exact ndarrays, None, or non-array types.
+         */
+        Py_ssize_t nargs = PyVectorcall_NARGS(len_args);
+        int all_exact = 1;
+        for (Py_ssize_t i = 0; i < nargs && all_exact; i++) {
+            if (PyArray_Check(args[i]) && !PyArray_CheckExact(args[i])) {
+                all_exact = 0;
+            }
+        }
+        if (kwnames != NULL) {
+            Py_ssize_t nkw = PyTuple_GET_SIZE(kwnames);
+            for (Py_ssize_t i = 0; i < nkw && all_exact; i++) {
+                PyObject *val = args[nargs + i];
+                if (PyArray_Check(val) && !PyArray_CheckExact(val)) {
+                    all_exact = 0;
+                }
+            }
+        }
+        if (all_exact) {
+            /* No overrides possible, call default_impl directly */
+            return PyObject_Vectorcall(
+                    self->default_impl, args, len_args, kwnames);
+        }
+
+        /* Slow path: call the relevant_arg_func and check for overrides */
         relevant_args = PyObject_Vectorcall(
                 self->relevant_arg_func, args, len_args, kwnames);
         if (relevant_args == NULL) {
