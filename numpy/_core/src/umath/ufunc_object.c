@@ -2542,10 +2542,6 @@ PyUFunc_Reduce(PyUFuncObject *ufunc,
         axis_flags[axis] = 1;
     }
 
-    if (_get_bufsize_errmask(&buffersize, &errormask) < 0) {
-        return NULL;
-    }
-
     PyArray_Descr *descrs[3];
     PyArrayMethodObject *ufuncimpl = reducelike_promote_and_resolve(ufunc,
             arr, out, signature, NPY_FALSE, descrs, NPY_UNSAFE_CASTING, "reduce");
@@ -2607,6 +2603,9 @@ PyUFunc_Reduce(PyUFuncObject *ufunc,
             res = -1;
         }
         if (res == 0 && !(flags & NPY_METH_NO_FLOATINGPOINT_ERRORS)) {
+            if (_get_bufsize_errmask(NULL, &errormask) < 0) {
+                goto fast_reduce_fail;
+            }
             res = _check_ufunc_fperr(errormask, ufunc_name);
         }
         if (res < 0) {
@@ -2634,7 +2633,14 @@ PyUFunc_Reduce(PyUFuncObject *ufunc,
         return NULL;
     }
 
-  slow_reduce:;
+  slow_reduce:
+    if (_get_bufsize_errmask(&buffersize, &errormask) < 0) {
+        for (int i = 0; i < 3; i++) {
+            Py_DECREF(descrs[i]);
+        }
+        return NULL;
+    }
+
     PyArrayObject *result = PyUFunc_ReduceWrapper(&context,
             arr, out, wheremask, axis_flags, keepdims,
             initial, reduce_loop, buffersize, ufunc_name, errormask);
