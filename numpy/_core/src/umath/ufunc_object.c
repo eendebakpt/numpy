@@ -2604,7 +2604,7 @@ PyUFunc_Reduce(PyUFuncObject *ufunc,
         NPY_AUXDATA_FREE(auxdata);
 
         if (res == 0 && PyErr_Occurred()) {
-            res = -1;
+            goto fast_reduce_fail;
         }
         if (res == 0 && !(flags & NPY_METH_NO_FLOATINGPOINT_ERRORS)) {
             res = _check_ufunc_fperr(errormask, ufunc_name);
@@ -2614,9 +2614,9 @@ PyUFunc_Reduce(PyUFuncObject *ufunc,
         }
 
         /* Create 0-D array result (caller handles scalar conversion) */
-        Py_INCREF(descrs[0]);
         PyArrayObject *ret = (PyArrayObject *)PyArray_NewFromDescr(
-                &PyArray_Type, descrs[0], 0, NULL, NULL, NULL, 0, NULL);
+                &PyArray_Type, (PyArray_Descr *)Py_NewRef(descrs[0]),
+                0, NULL, NULL, NULL, 0, NULL);
         if (ret == NULL) {
             goto fast_reduce_fail;
         }
@@ -3759,9 +3759,14 @@ PyUFunc_GenericReduction(PyUFuncObject *ufunc,
     }
 
     /* Ensure input is an array */
-    mp = (PyArrayObject *)PyArray_FromAny(op, NULL, 0, 0, 0, NULL);
-    if (mp == NULL) {
-        goto fail;
+    if (PyArray_Check(op)) {
+        mp = (PyArrayObject *)Py_NewRef(op);
+    }
+    else {
+        mp = (PyArrayObject *)PyArray_FromAny(op, NULL, 0, 0, 0, NULL);
+        if (mp == NULL) {
+            goto fail;
+        }
     }
 
     ndim = PyArray_NDIM(mp);
