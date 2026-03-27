@@ -818,6 +818,13 @@ typedef struct tagPyArrayObject_fields {
 #if NPY_FEATURE_VERSION >= NPY_1_22_API_VERSION
     PyObject *mem_handler;
 #endif
+    /*
+     * Inline storage for dimensions+strides when ndim <= 2.
+     * The dimensions and strides pointers point here instead of
+     * a separately allocated block.  This is backwards compatible:
+     * all code that reads fa->dimensions[i] works unchanged.
+     */
+    npy_intp _inline_dim_strides[4];
 } PyArrayObject_fields;
 
 /*

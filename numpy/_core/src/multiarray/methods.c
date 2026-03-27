@@ -2144,9 +2144,14 @@ array_setstate(PyArrayObject *self, PyObject *args)
     fa->nd = nd;
 
     if (nd > 0) {
-        fa->dimensions = npy_alloc_cache_dim(2 * nd);
-        if (fa->dimensions == NULL) {
-            return PyErr_NoMemory();
+        if (nd <= 2) {
+            fa->dimensions = fa->_inline_dim_strides;
+        }
+        else {
+            fa->dimensions = npy_alloc_cache_dim(2 * nd);
+            if (fa->dimensions == NULL) {
+                return PyErr_NoMemory();
+            }
         }
         fa->strides = PyArray_DIMS(self) + nd;
         if (nd) {

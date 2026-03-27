@@ -41,10 +41,19 @@ npy_free_cache_dim_obj(PyArray_Dims dims)
     npy_free_cache_dim(dims.ptr, dims.len);
 }
 
+static inline int
+_npy_dims_are_inline(PyArrayObject *arr)
+{
+    PyArrayObject_fields *fa = (PyArrayObject_fields *)arr;
+    return fa->dimensions == fa->_inline_dim_strides;
+}
+
 static inline void
 npy_free_cache_dim_array(PyArrayObject * arr)
 {
-    npy_free_cache_dim(PyArray_DIMS(arr), PyArray_NDIM(arr));
+    if (!_npy_dims_are_inline(arr)) {
+        npy_free_cache_dim(PyArray_DIMS(arr), 2 * PyArray_NDIM(arr));
+    }
 }
 
 extern PyDataMem_Handler default_handler;

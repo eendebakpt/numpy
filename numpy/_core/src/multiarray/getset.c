@@ -71,12 +71,17 @@ array_shape_set_internal(PyArrayObject *self, PyObject *val)
 
     nd = PyArray_NDIM(ret);
     if (nd > 0) {
-        /* create new dimensions and strides */
-        npy_intp *_dimensions = npy_alloc_cache_dim(2 * nd);
-        if (_dimensions == NULL) {
-            Py_DECREF(ret);
-            PyErr_NoMemory();
-            return -1;
+        npy_intp *_dimensions;
+        if (nd <= 2) {
+            _dimensions = ((PyArrayObject_fields *)self)->_inline_dim_strides;
+        }
+        else {
+            _dimensions = npy_alloc_cache_dim(2 * nd);
+            if (_dimensions == NULL) {
+                Py_DECREF(ret);
+                PyErr_NoMemory();
+                return -1;
+            }
         }
         /* Free old dimensions and strides */
         npy_free_cache_dim_array(self);
@@ -467,11 +472,17 @@ array_descr_set(PyArrayObject *self, PyObject *arg, void *NPY_UNUSED(ignored))
         }
         /* create new dimensions cache and fill it */
         npy_intp new_nd = PyArray_NDIM(temp);
-        npy_intp *new_dims = npy_alloc_cache_dim(2 * new_nd);
-        if (new_dims == NULL) {
-            Py_DECREF(temp);
-            PyErr_NoMemory();
-            return -1;
+        npy_intp *new_dims;
+        if (new_nd <= 2) {
+            new_dims = ((PyArrayObject_fields *)self)->_inline_dim_strides;
+        }
+        else {
+            new_dims = npy_alloc_cache_dim(2 * new_nd);
+            if (new_dims == NULL) {
+                Py_DECREF(temp);
+                PyErr_NoMemory();
+                return -1;
+            }
         }
         memcpy(new_dims, PyArray_DIMS(temp), new_nd * sizeof(npy_intp));
         memcpy(new_dims + new_nd, PyArray_STRIDES(temp), new_nd * sizeof(npy_intp));

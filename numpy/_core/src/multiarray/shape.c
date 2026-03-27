@@ -158,11 +158,25 @@ PyArray_Resize_int(PyArrayObject *self, PyArray_Dims *newshape, int refcheck)
             /* Different number of dimensions. */
             ((PyArrayObject_fields *)self)->nd = new_nd;
             /* Need new dimensions and strides arrays */
-            dimptr = PyDimMem_RENEW(PyArray_DIMS(self), 3*new_nd);
-            if (dimptr == NULL) {
-                PyErr_SetString(PyExc_MemoryError,
-                                "cannot allocate memory for array");
-                return -1;
+            if (new_nd <= 2) {
+                dimptr = ((PyArrayObject_fields *)self)->_inline_dim_strides;
+            }
+            else if (_npy_dims_are_inline(self)) {
+                /* Transition from inline to heap-allocated */
+                dimptr = PyDimMem_NEW(3*new_nd);
+                if (dimptr == NULL) {
+                    PyErr_SetString(PyExc_MemoryError,
+                                    "cannot allocate memory for array");
+                    return -1;
+                }
+            }
+            else {
+                dimptr = PyDimMem_RENEW(PyArray_DIMS(self), 3*new_nd);
+                if (dimptr == NULL) {
+                    PyErr_SetString(PyExc_MemoryError,
+                                    "cannot allocate memory for array");
+                    return -1;
+                }
             }
             ((PyArrayObject_fields *)self)->dimensions = dimptr;
             ((PyArrayObject_fields *)self)->strides = dimptr + new_nd;

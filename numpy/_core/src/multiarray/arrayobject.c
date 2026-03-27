@@ -455,7 +455,9 @@ _clear_array_attributes(PyArrayObject *self, npy_bool unraisable)
     }
 
     /* must match allocation in PyArray_NewFromDescr */
-    npy_free_cache_dim(fa->dimensions, 2 * fa->nd);
+    if (fa->dimensions != fa->_inline_dim_strides) {
+        npy_free_cache_dim(fa->dimensions, 2 * fa->nd);
+    }
     fa->dimensions = NULL;
     Py_CLEAR(fa->descr);
     return 0;

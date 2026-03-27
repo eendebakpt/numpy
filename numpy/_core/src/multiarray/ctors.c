@@ -778,10 +778,15 @@ PyArray_NewFromDescr_int(
     NPY_traverse_info_init(&fill_zero_info);
 
     if (nd > 0) {
-        fa->dimensions = npy_alloc_cache_dim(2 * nd);
-        if (fa->dimensions == NULL) {
-            PyErr_NoMemory();
-            goto fail;
+        if (nd <= 2) {
+            fa->dimensions = fa->_inline_dim_strides;
+        }
+        else {
+            fa->dimensions = npy_alloc_cache_dim(2 * nd);
+            if (fa->dimensions == NULL) {
+                PyErr_NoMemory();
+                goto fail;
+            }
         }
         fa->strides = fa->dimensions + nd;
 
@@ -1035,11 +1040,16 @@ PyArray_NewLikeArray_fast(PyArrayObject *input, PyArray_Descr *descr)
 
     npy_intp nbytes = descr->elsize;
     if (nd > 0) {
-        fa->dimensions = npy_alloc_cache_dim(2 * nd);
-        if (fa->dimensions == NULL) {
-            PyErr_NoMemory();
-            Py_DECREF(fa);
-            return NULL;
+        if (nd <= 2) {
+            fa->dimensions = fa->_inline_dim_strides;
+        }
+        else {
+            fa->dimensions = npy_alloc_cache_dim(2 * nd);
+            if (fa->dimensions == NULL) {
+                PyErr_NoMemory();
+                Py_DECREF(fa);
+                return NULL;
+            }
         }
         fa->strides = fa->dimensions + nd;
 
