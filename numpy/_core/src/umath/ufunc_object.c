@@ -2558,6 +2558,83 @@ PyUFunc_Reduce(PyUFuncObject *ufunc,
     context.caller = (PyObject *)ufunc;
     context.method = ufuncimpl;
 
+    /*
+     * Fast path for full contiguous reductions (axis=None):
+     * Skip NpyIter and ReduceWrapper entirely.  Call the strided
+     * reduce loop directly on the flat contiguous input data.
+     */
+    if (out == NULL && wheremask == NULL && initial == NULL && keepdims == 0
+            && naxes == ndim  /* axis=None reduces all axes */
+            && PyArray_ISCONTIGUOUS(arr)
+            && PyArray_DESCR(arr) == descrs[1]  /* no casting needed */
+            && ufuncimpl->get_reduction_initial != NULL
+            && !PyDataType_REFCHK(descrs[0])) {
+
+        npy_intp count = PyArray_SIZE(arr);
+
+        /* Get the identity/initial value */
+        npy_clongdouble initial_storage;
+        char *accum = (char *)&initial_storage;
+        int has_initial = ufuncimpl->get_reduction_initial(
+                &context, count == 0, accum);
+        if (has_initial < 0) {
+            goto fast_reduce_fail;
+        }
+        if (!has_initial || count == 0) {
+            goto slow_reduce;
+        }
+
+        /* Get the strided loop */
+        npy_intp strides[3] = {0, descrs[1]->elsize, 0};
+        PyArrayMethod_StridedLoop *strided_loop;
+        NpyAuxData *auxdata = NULL;
+        NPY_ARRAYMETHOD_FLAGS flags = 0;
+        if (ufuncimpl->get_strided_loop(
+                &context, 1, 0, strides,
+                &strided_loop, &auxdata, &flags) < 0) {
+            goto fast_reduce_fail;
+        }
+
+        if (!(flags & NPY_METH_NO_FLOATINGPOINT_ERRORS)) {
+            npy_clear_floatstatus_barrier((char *)&context);
+        }
+
+        char *data[3] = {accum, PyArray_BYTES(arr), accum};
+        int res = strided_loop(&context, data, &count, strides, auxdata);
+        NPY_AUXDATA_FREE(auxdata);
+
+        if (res == 0 && PyErr_Occurred()) {
+            res = -1;
+        }
+        if (res == 0 && !(flags & NPY_METH_NO_FLOATINGPOINT_ERRORS)) {
+            res = _check_ufunc_fperr(errormask, ufunc_name);
+        }
+        if (res < 0) {
+            goto fast_reduce_fail;
+        }
+
+        /* Create 0-D array result (caller handles scalar conversion) */
+        Py_INCREF(descrs[0]);
+        PyArrayObject *ret = (PyArrayObject *)PyArray_NewFromDescr(
+                &PyArray_Type, descrs[0], 0, NULL, NULL, NULL, 0, NULL);
+        if (ret == NULL) {
+            goto fast_reduce_fail;
+        }
+        memcpy(PyArray_DATA(ret), accum, descrs[0]->elsize);
+
+        for (int i = 0; i < 3; i++) {
+            Py_DECREF(descrs[i]);
+        }
+        return ret;
+
+      fast_reduce_fail:
+        for (int i = 0; i < 3; i++) {
+            Py_DECREF(descrs[i]);
+        }
+        return NULL;
+    }
+
+  slow_reduce:;
     PyArrayObject *result = PyUFunc_ReduceWrapper(&context,
             arr, out, wheremask, axis_flags, keepdims,
             initial, reduce_loop, buffersize, ufunc_name, errormask);
