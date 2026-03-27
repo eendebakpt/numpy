@@ -265,6 +265,70 @@ class TestArrayFunctionDispatch:
 
         assert_equal(result, "overridden")
 
+    # Regression tests for the "exact-ndarray-or-basic-type" fast path in
+    # `dispatcher_vectorcall`.  A naive implementation that only checks
+    # `PyArray_CheckExact` would silently drop `__array_function__` for
+    # duck arrays that are not ndarray subclasses (dask/cupy/jax/torch
+    # style objects), violating NEP 18.  These tests exercise a numpy
+    # function with an actual C dispatcher (`np.sum`) to make sure the
+    # fast path checks type identity, not just "is it an ndarray subclass".
+
+    def test_pure_duck_array_positional(self):
+        """A non-ndarray class with __array_function__ must dispatch (NEP 18)."""
+
+        class DuckArray:
+            def __array_function__(self, func, types, args, kwargs):
+                return ("dispatched", func)
+
+        result = np.sum(DuckArray())
+        assert result[0] == "dispatched"
+        assert result[1] is np.sum
+
+    def test_pure_duck_array_keyword_out(self):
+        """__array_function__ must dispatch when a duck array is a keyword arg."""
+
+        class DuckArray:
+            def __array_function__(self, func, types, args, kwargs):
+                return "dispatched"
+
+        # Mix an exact ndarray positional with a duck-array `out=` kwarg.
+        # The exact-ndarray positional would otherwise trigger the fast path.
+        result = np.sum(np.array([1, 2, 3]), out=DuckArray())
+        assert result == "dispatched"
+
+    def test_pure_duck_array_mixed_positional(self):
+        """__array_function__ must dispatch when only one of several
+        positional args is a duck array."""
+
+        class DuckArray:
+            def __array_function__(self, func, types, args, kwargs):
+                return "dispatched"
+
+        result = np.concatenate((np.array([1, 2]), DuckArray()))
+        assert result == "dispatched"
+
+    def test_ndarray_subclass_still_dispatched(self):
+        """Regression: ndarray subclasses with __array_function__ must dispatch."""
+
+        class SubArr(np.ndarray):
+            def __array_function__(self, func, types, args, kwargs):
+                return "sub_override"
+
+        arr = np.array([1, 2, 3]).view(SubArr)
+        assert np.sum(arr) == "sub_override"
+
+    def test_exact_ndarray_basic_kwargs_fast_path(self):
+        """Positive control: exact ndarrays with basic-type kwargs must
+        return the normal numeric result (the fast path fires and no
+        __array_function__ is invoked)."""
+
+        assert np.sum(np.array([1, 2, 3])) == 6
+        assert np.sum(np.array([1.0, 2.0])) == 3.0
+        # Basic-Python-type keyword args must also be accepted by the
+        # fast path: None, dtype, bool, tuple.
+        assert np.sum(np.array([1, 2, 3]), axis=None, dtype=np.float64) == 6.0
+        assert np.sum(np.array([[1, 2], [3, 4]]), axis=(0,)).tolist() == [4, 6]
+
 
 class TestVerifyMatchingSignatures:
 

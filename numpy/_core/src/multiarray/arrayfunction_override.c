@@ -511,7 +511,57 @@ dispatcher_vectorcall(PyArray_ArrayFunctionDispatcherObject *self,
     if (self->relevant_arg_func != NULL) {
         public_api = (PyObject *)self;
 
-        /* Typical path, need to call the relevant_arg_func and unpack them */
+        /*
+         * Fast path: if every positional and keyword argument is either an
+         * exact ndarray or a *scalar* Python builtin (int/float/str/None/...),
+         * no `__array_function__` override is possible and the dispatcher
+         * machinery can be skipped entirely.
+         *
+         * Correctness notes:
+         *   1. It is NOT sufficient to check `!PyArray_Check() ||
+         *      PyArray_CheckExact()`.  Duck-array libraries such as dask,
+         *      cupy, jax, torch expose objects that are not ndarray
+         *      subclasses but do implement `__array_function__`; letting
+         *      those slip through silently drops the override (NEP 18).
+         *   2. Container types (list, tuple, dict, set, frozenset) can
+         *      *contain* duck arrays.  For example `np.concatenate` yields
+         *      from its `arrays` tuple in its dispatcher, so passing
+         *      `(np.array(...), duck_array)` must still dispatch.  We
+         *      therefore exclude the container types here even though
+         *      `_is_basic_python_type` treats them as basic.
+         */
+#define NPY_IS_FASTPATH_SAFE_TYPE(tp)                                 \
+    ((tp) == &PyArray_Type                                            \
+     || (_is_basic_python_type(tp)                                    \
+         && (tp) != &PyList_Type                                      \
+         && (tp) != &PyTuple_Type                                     \
+         && (tp) != &PyDict_Type                                      \
+         && (tp) != &PySet_Type                                       \
+         && (tp) != &PyFrozenSet_Type))
+
+        Py_ssize_t nargs = PyVectorcall_NARGS(len_args);
+        int all_safe = 1;
+        for (Py_ssize_t i = 0; i < nargs && all_safe; i++) {
+            if (!NPY_IS_FASTPATH_SAFE_TYPE(Py_TYPE(args[i]))) {
+                all_safe = 0;
+            }
+        }
+        if (kwnames != NULL) {
+            Py_ssize_t nkw = PyTuple_GET_SIZE(kwnames);
+            for (Py_ssize_t i = 0; i < nkw && all_safe; i++) {
+                if (!NPY_IS_FASTPATH_SAFE_TYPE(Py_TYPE(args[nargs + i]))) {
+                    all_safe = 0;
+                }
+            }
+        }
+#undef NPY_IS_FASTPATH_SAFE_TYPE
+        if (all_safe) {
+            /* No overrides possible, call default_impl directly */
+            return PyObject_Vectorcall(
+                    self->default_impl, args, len_args, kwnames);
+        }
+
+        /* Slow path: call the relevant_arg_func and check for overrides */
         relevant_args = PyObject_Vectorcall(
                 self->relevant_arg_func, args, len_args, kwnames);
         if (relevant_args == NULL) {
