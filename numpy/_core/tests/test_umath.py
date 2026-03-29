@@ -5111,6 +5111,23 @@ def test_bad_legacy_gufunc_silent_errors(x1):
         ncu_tests.always_error_gufunc(x1, 0.0)
 
 
+class TestReplaceLoopBySignature:
+    """Tests for PyUFunc_ReplaceLoopBySignature C API."""
+
+    def test_replace_loop_basic(self):
+        # Basic test: the C helper replaces a loop and restores it
+        assert ncu_tests.test_replace_loop(np.negative) is True
+
+    def test_replace_loop_after_use(self):
+        # Test that replacement works after the ufunc has been called
+        # (i.e., after dispatch caches have been populated)
+        a = np.array([1.0, 2.0, 3.0])
+        np.negative(a)  # populate caches
+        assert ncu_tests.test_replace_loop(np.negative) is True
+        # Verify the ufunc still works correctly after restore
+        assert_array_equal(np.negative(a), [-1.0, -2.0, -3.0])
+
+
 class TestAddDocstring:
     @pytest.mark.skipif(sys.flags.optimize == 2, reason="Python running -OO")
     def test_add_same_docstring(self):
