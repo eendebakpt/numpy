@@ -69,28 +69,6 @@
 #include "number.h"
 #include "scalartypes.h"  // for is_anyscalar_exact and scalar_value
 
-/// function to print debugging messages
-//inline std::string base_name(std::string const &path) { return path.substr(path.find_last_of("/\\") + 1); }
-
-static inline void printfd_handler (const char *file, const char *func, int line, const char *message, ...) {
-       // std::string s = file;
-        //s = base_name (s);
-        int verbose = 0;
-
-        if (verbose) {
-            //const char *fileshort = s.c_str ();
-            printf ("file %s: function %s: line %d: ", file, func, line);
-            char buf[32 * 1024];
-
-            va_list va;
-            va_start (va, message);
-            vsnprintf (buf, 32*1024, message, va);
-            va_end (va);
-            printf ("%s", buf);
-        }
-}
-#define printfd(...) printfd_handler (__FILE__, __FUNCTION__, __LINE__, __VA_ARGS__)
-#define printfd(...) 
 
 /********** PRINTF DEBUG TRACING **************/
 #define NPY_UF_DBG_TRACING 0
@@ -767,7 +745,6 @@ convert_ufunc_arguments(PyUFuncObject *ufunc,
     if (full_args_light->out != NULL) {
         for (int i = 0; i < nout; i++) {
             obj = full_args_light->out[i];
-            printfd("convert_ufunc_arguments: call to _set_out_array: obj %p i %d nin %d nout %d\n", obj, i, nin, nout );
             if (_set_out_array(obj, out_op + i + nin) < 0) {
                 goto fail;
             }
@@ -3462,13 +3439,12 @@ _set_full_args_out(int nout, PyObject *out_obj,
         }
         else {
             /* Populate full_args_light.out if provided (owned refs) */
-            if (full_args_light->out != NULL) {
-                for (int i = 0; i < nout; i++) {
-                    PyObject *item = PyTuple_GET_ITEM(out_obj, i);
-                    full_args_light->out[i] = Py_NewRef(item);
-                }
-                full_args_light->nout = nout;
+            assert(full_args_light->out != NULL);
+            for (int i = 0; i < nout; i++) {
+                PyObject *item = PyTuple_GET_ITEM(out_obj, i);
+                full_args_light->out[i] = Py_NewRef(item);
             }
+            full_args_light->nout = nout;
         }
     }
     else if (nout == 1) {
@@ -3476,10 +3452,9 @@ _set_full_args_out(int nout, PyObject *out_obj,
             return 0;
         }
         /* Can be an array if it only has one output */
-        if (full_args_light != NULL && full_args_light->out != NULL) {
-            full_args_light->out[0] = Py_NewRef(out_obj);
-            full_args_light->nout = 1;
-        }
+        assert(full_args_light->out != NULL);
+        full_args_light->out[0] = Py_NewRef(out_obj);
+        full_args_light->nout = 1;
     }
     else {
         PyErr_SetString(PyExc_TypeError,
@@ -4285,10 +4260,8 @@ replace_with_wrapped_result_and_return(PyUFuncObject *ufunc,
 
     if (!subok) {
         /* subok=False ignores input wrapping (but not output) */
-        Py_INCREF(Py_None);
-        wrap = Py_None;
-        Py_INCREF(&PyArray_Type);
-        wrap_type = (PyObject *)&PyArray_Type;
+        wrap = Py_NewRef(Py_None);
+        wrap_type = Py_NewRef(&PyArray_Type);
     }
     else if (npy_find_array_wrap(
             full_args_light->nin, full_args_light->in,
@@ -4500,14 +4473,12 @@ ufunc_generic_fastcall(PyUFuncObject *ufunc,
 {
     int errval;
     int nin = ufunc->nin, nout = ufunc->nout, nop = ufunc->nargs;
-    //printf("ufunc_generic_fastcall %d %d outer %d\n", nin, nout, outer);
 
     if (len_args == 1 && kwnames == NULL && !PyArray_Check(args[0])
             && nin == 1 && nout == 1 && !ufunc->core_enabled) {
         // Possibly scalar input, try the fast path, falling back on failure.
         PyObject *result = NULL;
         if (try_trivial_scalar_call(ufunc, args[0], &result) != -2) {
-            printfd("ufunc_generic_fastcall %d %d: try_trivial_scalar_call worked\n", nin, nout);
             return result;
         }
     }
@@ -4681,7 +4652,6 @@ ufunc_generic_fastcall(PyUFuncObject *ufunc,
                         "positional and keyword argument");
                 goto fail;
             }
-            printfd("ufunc_generic_fastcall: out via kwargs\n");
             if (out_obj == Py_Ellipsis) {
                 return_scalar = NPY_FALSE;
             }
@@ -4717,7 +4687,6 @@ ufunc_generic_fastcall(PyUFuncObject *ufunc,
         method = "outer";
     }
     /* We now have all the information required to check for Overrides */
-    printfd("ufunc_generic_fastcall: calling PyUFunc_CheckOverride\n");
 
     PyObject *override = NULL;
     errval = PyUFunc_CheckOverride(ufunc, method,
@@ -4753,7 +4722,6 @@ ufunc_generic_fastcall(PyUFuncObject *ufunc,
             goto fail;
         }
     }
-    printfd("ufunc_generic_fastcall: after prepare_input_arguments_for_outer\n");
 
 
     /*
@@ -4764,7 +4732,6 @@ ufunc_generic_fastcall(PyUFuncObject *ufunc,
             dtype_obj, signature_obj, signature) < 0) {
         goto fail;
     }
-    printfd("ufunc_generic_fastcall: after _get_fixed_signature\n");
 
     NPY_ORDER order = NPY_KEEPORDER;
     NPY_CASTING casting = NPY_DEFAULT_ASSIGN_CASTING;
@@ -4786,7 +4753,6 @@ ufunc_generic_fastcall(PyUFuncObject *ufunc,
             keepdims_obj, &keepdims) < 0) {
         goto fail;
     }
-    printfd("ufunc_generic_fastcall: after convert_ufunc_arguments\n");
 
     /*
      * Note that part of the promotion is to the complete the signature
@@ -4841,12 +4807,10 @@ ufunc_generic_fastcall(PyUFuncObject *ufunc,
             Py_DECREF(operands[i]);
         }
     }
-    printfd("ufunc_generic_fastcall: after variable clear\n");
 
     /* The following steals the references to the outputs: */
     PyObject *result = replace_with_wrapped_result_and_return(ufunc,
             &full_args_light, subok, operands+nin, return_scalar);
-    printfd("ufunc_generic_fastcall: after replace_with_wrapped_result_and_return\n");
 
     if (outer) {
         _xdecref_pyobjects(full_args_light.in, nin);
