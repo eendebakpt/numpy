@@ -105,6 +105,27 @@ def verify_matching_signatures(implementation, dispatcher):
                                'default argument values')
 
 
+def _resolve_relevant_arg_spec(implementation, relevant_arg_names):
+    """Resolve a tuple of arg names into ((name, position), ...) pairs.
+
+    Raises RuntimeError if any name is not found in the implementation's
+    signature.  Used by the fast-dispatch path.
+    """
+    co = implementation.__code__
+    n_args = co.co_argcount + co.co_kwonlyargcount
+    varnames = co.co_varnames[:n_args]
+    resolved = []
+    for name in relevant_arg_names:
+        try:
+            pos = varnames.index(name)
+        except ValueError:
+            raise RuntimeError(
+                f"relevant arg {name!r} not found in "
+                f"{implementation.__qualname__} signature") from None
+        resolved.append((name, pos))
+    return tuple(resolved)
+
+
 def array_function_dispatch(dispatcher=None, module=None, verify=True,
                             docs_from_dispatcher=False):
     """Decorator for adding dispatch with the __array_function__ protocol.
@@ -113,12 +134,16 @@ def array_function_dispatch(dispatcher=None, module=None, verify=True,
 
     Parameters
     ----------
-    dispatcher : callable or None
-        Function that when called like ``dispatcher(*args, **kwargs)`` with
-        arguments from the NumPy function call returns an iterable of
+    dispatcher : callable, tuple of str, or None
+        If a callable: when called like ``dispatcher(*args, **kwargs)`` with
+        arguments from the NumPy function call it returns an iterable of
         array-like arguments to check for ``__array_function__``.
 
-        If `None`, the first argument is used as the single `like=` argument
+        If a tuple of strings: names of positional/keyword arguments of the
+        decorated function that should be checked for ``__array_function__``.
+        This skips the Python-level dispatcher call for a small perf win.
+
+        If ``None``, the first argument is used as the single `like=` argument
         and not passed on.  A function implementing `like=` must call its
         dispatcher with `like` as the first non-keyword argument.
     module : str, optional
@@ -142,8 +167,13 @@ def array_function_dispatch(dispatcher=None, module=None, verify=True,
     Function suitable for decorating the implementation of a NumPy function.
 
     """
+    is_tuple_spec = (
+        dispatcher is not None
+        and not callable(dispatcher)
+        and isinstance(dispatcher, tuple))
+
     def decorator(implementation):
-        if verify:
+        if verify and not is_tuple_spec:
             if dispatcher is not None:
                 verify_matching_signatures(implementation, dispatcher)
             else:
@@ -157,14 +187,19 @@ def array_function_dispatch(dispatcher=None, module=None, verify=True,
                         "argument and a keyword-only argument. "
                         f"{implementation} does not seem to comply.")
 
-        if docs_from_dispatcher and dispatcher.__doc__ is not None:
+        if docs_from_dispatcher and not is_tuple_spec and dispatcher.__doc__ is not None:
             doc = inspect.cleandoc(dispatcher.__doc__)
             add_docstring(implementation, doc)
 
-        public_api = _ArrayFunctionDispatcher(dispatcher, implementation)
+        if is_tuple_spec:
+            spec = _resolve_relevant_arg_spec(implementation, dispatcher)
+            public_api = _ArrayFunctionDispatcher(spec, implementation)
+        else:
+            public_api = _ArrayFunctionDispatcher(dispatcher, implementation)
         functools.update_wrapper(public_api, implementation)
 
-        if not verify and not getattr(implementation, "__text_signature__", None):
+        if not verify and not is_tuple_spec and not getattr(
+                implementation, "__text_signature__", None):
             public_api.__signature__ = inspect.signature(dispatcher)
 
         if module is not None:

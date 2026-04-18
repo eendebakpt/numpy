@@ -1293,11 +1293,7 @@ def argsort(a, axis=-1, kind=None, order=None, *, stable=None, descending=np._No
         stable=stable,
     )
 
-def _argmax_dispatcher(a, axis=None, out=None, *, keepdims=np._NoValue):
-    return (a, out)
-
-
-@array_function_dispatch(_argmax_dispatcher)
+@array_function_dispatch(("a", "out"))
 def argmax(a, axis=None, out=None, *, keepdims=np._NoValue):
     """
     Returns the indices of the maximum values along an axis.
@@ -1393,11 +1389,7 @@ def argmax(a, axis=None, out=None, *, keepdims=np._NoValue):
     return _wrapfunc(a, 'argmax', axis=axis, out=out, **kwds)
 
 
-def _argmin_dispatcher(a, axis=None, out=None, *, keepdims=np._NoValue):
-    return (a, out)
-
-
-@array_function_dispatch(_argmin_dispatcher)
+@array_function_dispatch(("a", "out"))
 def argmin(a, axis=None, out=None, *, keepdims=np._NoValue):
     """
     Returns the indices of the minimum values along an axis.
@@ -2375,12 +2367,7 @@ def clip(a, a_min=np._NoValue, a_max=np._NoValue, out=None, *,
     return _wrapfunc(a, 'clip', a_min, a_max, out=out, **kwargs)
 
 
-def _sum_dispatcher(a, axis=None, dtype=None, out=None, keepdims=None,
-                    initial=None, where=None):
-    return (a, out)
-
-
-@array_function_dispatch(_sum_dispatcher)
+@array_function_dispatch(("a", "out"))
 def sum(a, axis=None, dtype=None, out=None, keepdims=np._NoValue,
         initial=np._NoValue, where=np._NoValue):
     """
@@ -2506,12 +2493,7 @@ def sum(a, axis=None, dtype=None, out=None, keepdims=np._NoValue,
     )
 
 
-def _any_dispatcher(a, axis=None, out=None, keepdims=None, *,
-                    where=np._NoValue):
-    return (a, where, out)
-
-
-@array_function_dispatch(_any_dispatcher)
+@array_function_dispatch(("a", "where", "out"))
 def any(a, axis=None, out=None, keepdims=np._NoValue, *, where=np._NoValue):
     """
     Test whether any array element along a given axis evaluates to True.
@@ -2618,12 +2600,7 @@ def any(a, axis=None, out=None, keepdims=np._NoValue, *, where=np._NoValue):
                                   keepdims, where)
 
 
-def _all_dispatcher(a, axis=None, out=None, keepdims=None, *,
-                    where=None):
-    return (a, where, out)
-
-
-@array_function_dispatch(_all_dispatcher)
+@array_function_dispatch(("a", "where", "out"))
 def all(a, axis=None, out=None, keepdims=np._NoValue, *, where=np._NoValue):
     """
     Test whether all array elements along a given axis evaluate to True.
@@ -2742,12 +2719,7 @@ def _cumulative_func(x, func, axis, dtype, out, include_initial):
     return res
 
 
-def _cumulative_prod_dispatcher(x, /, *, axis=None, dtype=None, out=None,
-                                include_initial=None):
-    return (x, out)
-
-
-@array_function_dispatch(_cumulative_prod_dispatcher)
+@array_function_dispatch(("x", "out"))
 def cumulative_prod(x, /, *, axis=None, dtype=None, out=None,
                     include_initial=False):
     """
@@ -2819,12 +2791,7 @@ def cumulative_prod(x, /, *, axis=None, dtype=None, out=None,
     return _cumulative_func(x, um.multiply, axis, dtype, out, include_initial)
 
 
-def _cumulative_sum_dispatcher(x, /, *, axis=None, dtype=None, out=None,
-                               include_initial=None):
-    return (x, out)
-
-
-@array_function_dispatch(_cumulative_sum_dispatcher)
+@array_function_dispatch(("x", "out"))
 def cumulative_sum(x, /, *, axis=None, dtype=None, out=None,
                    include_initial=False):
     """
@@ -2909,11 +2876,7 @@ def cumulative_sum(x, /, *, axis=None, dtype=None, out=None,
     return _cumulative_func(x, um.add, axis, dtype, out, include_initial)
 
 
-def _cumsum_dispatcher(a, axis=None, dtype=None, out=None):
-    return (a, out)
-
-
-@array_function_dispatch(_cumsum_dispatcher)
+@array_function_dispatch(("a", "out"))
 def cumsum(a, axis=None, dtype=None, out=None):
     """
     Return the cumulative sum of the elements along a given axis.
@@ -2992,11 +2955,7 @@ def cumsum(a, axis=None, dtype=None, out=None):
     return _wrapfunc(a, 'cumsum', axis=axis, dtype=dtype, out=out)
 
 
-def _ptp_dispatcher(a, axis=None, out=None, keepdims=None):
-    return (a, out)
-
-
-@array_function_dispatch(_ptp_dispatcher)
+@array_function_dispatch(("a", "out"))
 def ptp(a, axis=None, out=None, keepdims=np._NoValue):
     """
     Range of values (maximum - minimum) along an axis.
@@ -3081,12 +3040,7 @@ def ptp(a, axis=None, out=None, keepdims=np._NoValue):
     return _methods._ptp(a, axis=axis, out=out, **kwargs)
 
 
-def _max_dispatcher(a, axis=None, out=None, keepdims=None, initial=None,
-                    where=None):
-    return (a, out)
-
-
-@array_function_dispatch(_max_dispatcher)
+@array_function_dispatch(("a", "out"))
 @set_module('numpy')
 def max(a, axis=None, out=None, keepdims=np._NoValue, initial=np._NoValue,
          where=np._NoValue):
@@ -3202,7 +3156,7 @@ def max(a, axis=None, out=None, keepdims=np._NoValue, initial=np._NoValue,
                           keepdims, initial, where)
 
 
-@array_function_dispatch(_max_dispatcher)
+@array_function_dispatch(("a", "out"))
 def amax(a, axis=None, out=None, keepdims=np._NoValue, initial=np._NoValue,
          where=np._NoValue):
     """
@@ -3219,12 +3173,7 @@ def amax(a, axis=None, out=None, keepdims=np._NoValue, initial=np._NoValue,
                           keepdims, initial, where)
 
 
-def _min_dispatcher(a, axis=None, out=None, keepdims=None, initial=None,
-                    where=None):
-    return (a, out)
-
-
-@array_function_dispatch(_min_dispatcher)
+@array_function_dispatch(("a", "out"))
 def min(a, axis=None, out=None, keepdims=np._NoValue, initial=np._NoValue,
         where=np._NoValue):
     """
@@ -3340,7 +3289,7 @@ def min(a, axis=None, out=None, keepdims=np._NoValue, initial=np._NoValue,
                           keepdims, initial, where)
 
 
-@array_function_dispatch(_min_dispatcher)
+@array_function_dispatch(("a", "out"))
 def amin(a, axis=None, out=None, keepdims=np._NoValue, initial=np._NoValue,
          where=np._NoValue):
     """
@@ -3357,12 +3306,7 @@ def amin(a, axis=None, out=None, keepdims=np._NoValue, initial=np._NoValue,
                           keepdims, initial, where)
 
 
-def _prod_dispatcher(a, axis=None, dtype=None, out=None, keepdims=None,
-                     initial=None, where=None):
-    return (a, out)
-
-
-@array_function_dispatch(_prod_dispatcher)
+@array_function_dispatch(("a", "out"))
 def prod(a, axis=None, dtype=None, out=None, keepdims=np._NoValue,
          initial=np._NoValue, where=np._NoValue):
     """
@@ -3483,11 +3427,7 @@ def prod(a, axis=None, dtype=None, out=None, keepdims=np._NoValue,
                           keepdims, initial, where)
 
 
-def _cumprod_dispatcher(a, axis=None, dtype=None, out=None):
-    return (a, out)
-
-
-@array_function_dispatch(_cumprod_dispatcher)
+@array_function_dispatch(("a", "out"))
 def cumprod(a, axis=None, dtype=None, out=None):
     """
     Return the cumulative product of elements along a given axis.
@@ -3769,12 +3709,7 @@ def around(a, decimals=0, out=None):
     return _wrapfunc(a, 'round', decimals=decimals, out=out)
 
 
-def _mean_dispatcher(a, axis=None, dtype=None, out=None, keepdims=None, *,
-                     where=None):
-    return (a, where, out)
-
-
-@array_function_dispatch(_mean_dispatcher)
+@array_function_dispatch(("a", "where", "out"))
 def mean(a, axis=None, dtype=None, out=None, keepdims=np._NoValue, *,
          where=np._NoValue):
     """
@@ -3903,12 +3838,7 @@ def mean(a, axis=None, dtype=None, out=None, keepdims=np._NoValue, *,
                           out=out, **kwargs)
 
 
-def _std_dispatcher(a, axis=None, dtype=None, out=None, ddof=None,
-                    keepdims=None, *, where=None, mean=None, correction=None):
-    return (a, where, out, mean)
-
-
-@array_function_dispatch(_std_dispatcher)
+@array_function_dispatch(("a", "where", "out", "mean"))
 def std(a, axis=None, dtype=None, out=None, ddof=0, keepdims=np._NoValue, *,
         where=np._NoValue, mean=np._NoValue, correction=np._NoValue):
     r"""
@@ -4107,12 +4037,7 @@ def std(a, axis=None, dtype=None, out=None, ddof=0, keepdims=np._NoValue, *,
                          **kwargs)
 
 
-def _var_dispatcher(a, axis=None, dtype=None, out=None, ddof=None,
-                    keepdims=None, *, where=None, mean=None, correction=None):
-    return (a, where, out, mean)
-
-
-@array_function_dispatch(_var_dispatcher)
+@array_function_dispatch(("a", "where", "out", "mean"))
 def var(a, axis=None, dtype=None, out=None, ddof=0, keepdims=np._NoValue, *,
         where=np._NoValue, mean=np._NoValue, correction=np._NoValue):
     r"""

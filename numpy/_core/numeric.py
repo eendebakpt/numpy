@@ -476,11 +476,7 @@ def full_like(
     return res
 
 
-def _count_nonzero_dispatcher(a, axis=None, *, keepdims=None):
-    return (a,)
-
-
-@array_function_dispatch(_count_nonzero_dispatcher)
+@array_function_dispatch(("a",))
 def count_nonzero(a, axis=None, *, keepdims=False):
     """
     Counts the number of non-zero values in the array ``a``.

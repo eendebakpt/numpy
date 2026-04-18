@@ -52,18 +52,15 @@ pyobject_array_insert(PyObject **array, int length, int index, PyObject *item)
 /*
  * Collects arguments with __array_function__ and their corresponding methods
  * in the order in which they should be tried (i.e., skipping redundant types).
- * `relevant_args` is expected to have been produced by PySequence_Fast.
+ * `items` is a C array of `length` borrowed references.
  * Returns the number of arguments, or -1 on failure.
  */
 static int
-get_implementing_args_and_methods(PyObject *relevant_args,
-                                  PyObject **implementing_args,
-                                  PyObject **methods)
+get_implementing_args_and_methods(
+        PyObject **items, Py_ssize_t length,
+        PyObject **implementing_args, PyObject **methods)
 {
     int num_implementing_args = 0;
-
-    PyObject **items = PySequence_Fast_ITEMS(relevant_args);
-    Py_ssize_t length = PySequence_Fast_GET_SIZE(relevant_args);
 
     for (Py_ssize_t i = 0; i < length; i++) {
         int new_class = 1;
@@ -379,7 +376,9 @@ array__get_implementing_args(
     }
 
     int num_implementing_args = get_implementing_args_and_methods(
-        relevant_args, implementing_args, array_function_methods);
+            PySequence_Fast_ITEMS(relevant_args),
+            PySequence_Fast_GET_SIZE(relevant_args),
+            implementing_args, array_function_methods);
     if (num_implementing_args == -1) {
         goto cleanup;
     }
@@ -411,6 +410,17 @@ typedef struct {
     PyObject *dict;
     PyObject *relevant_arg_func;
     PyObject *default_impl;
+    /*
+     * Fast-path: if relevant_arg_func is NULL and relevant_arg_positions
+     * is non-NULL, the list of relevant arguments is derived from these
+     * positions/names without calling a Python dispatcher.
+     * relevant_arg_positions[i] is the 0-based positional index in the
+     * implementation's signature; relevant_arg_names[i] is the interned
+     * string for kwarg lookup.  Missing args yield Py_None.
+     */
+    int n_relevant_args;
+    int *relevant_arg_positions;
+    PyObject **relevant_arg_names;
     /* The following fields are used to clean up TypeError messages only: */
     PyObject *dispatcher_name;
     PyObject *public_name;
@@ -425,6 +435,13 @@ dispatcher_dealloc(PyArray_ArrayFunctionDispatcherObject *self)
     Py_CLEAR(self->dict);
     Py_CLEAR(self->dispatcher_name);
     Py_CLEAR(self->public_name);
+    if (self->relevant_arg_names != NULL) {
+        for (int i = 0; i < self->n_relevant_args; i++) {
+            Py_XDECREF(self->relevant_arg_names[i]);
+        }
+        PyMem_Free(self->relevant_arg_names);
+    }
+    PyMem_Free(self->relevant_arg_positions);
     PyObject_FREE(self);
 }
 
@@ -489,6 +506,50 @@ fix_name_if_typeerror(PyArray_ArrayFunctionDispatcherObject *self)
 }
 
 
+/*
+ * Return 1 if `a` is guaranteed not to implement ``__array_function__``.
+ *
+ * An exact ``ndarray`` or any basic Python builtin type (see
+ * ``_is_basic_python_type``) cannot carry an override, so the override
+ * machinery can be skipped entirely when every relevant arg is safe.
+ */
+static inline int
+is_safe_arg(PyObject *a)
+{
+    PyTypeObject *tp = Py_TYPE(a);
+    return tp == &PyArray_Type || _is_basic_python_type(tp);
+}
+
+
+/*
+ * For a tuple-spec dispatcher, extract the value of the i-th relevant arg
+ * from positional/keyword arguments.  Returns Py_None if the arg is missing
+ * (so downstream checks can short-circuit on None).
+ */
+static inline PyObject *
+lookup_relevant_arg(
+        PyArray_ArrayFunctionDispatcherObject *self, int i,
+        PyObject *const *args, Py_ssize_t nargs,
+        PyObject *kwnames, Py_ssize_t nkwargs)
+{
+    int pos = self->relevant_arg_positions[i];
+    if (pos >= 0 && pos < nargs) {
+        return args[pos];
+    }
+    if (nkwargs > 0) {
+        PyObject *name = self->relevant_arg_names[i];
+        for (Py_ssize_t k = 0; k < nkwargs; k++) {
+            PyObject *kw = PyTuple_GET_ITEM(kwnames, k);
+            /* Interned string pointer compare first, then full cmp. */
+            if (kw == name || PyUnicode_Compare(kw, name) == 0) {
+                return args[nargs + k];
+            }
+        }
+    }
+    return Py_None;
+}
+
+
 static PyObject *
 dispatcher_vectorcall(PyArray_ArrayFunctionDispatcherObject *self,
         PyObject *const *args, Py_ssize_t len_args, PyObject *kwnames)
@@ -508,7 +569,47 @@ dispatcher_vectorcall(PyArray_ArrayFunctionDispatcherObject *self,
 
     int num_implementing_args;
 
-    if (self->relevant_arg_func != NULL) {
+    if (self->relevant_arg_positions != NULL) {
+        /*
+         * Tuple-spec path: collect relevant args directly from the call
+         * arguments, checking each for __array_function__ safety.  If
+         * every relevant arg is safe, no override is possible -- skip
+         * the override machinery and call default_impl directly.
+         *
+         * Restricted to tuple-spec dispatchers because:
+         *  - tuple-spec encodes which args are relevant, so we only check
+         *    those (e.g. ``axis=(0, 1)`` is a tuple, but not a relevant arg);
+         *  - legacy callable dispatchers may have side effects (raising etc.)
+         *    that callers depend on.
+         */
+        public_api = (PyObject *)self;
+        PyObject *items[NPY_MAXARGS];
+        Py_ssize_t nargs = PyVectorcall_NARGS(len_args);
+        Py_ssize_t nkwargs = (kwnames != NULL) ? PyTuple_GET_SIZE(kwnames) : 0;
+        int all_safe = 1;
+
+        for (int i = 0; i < self->n_relevant_args; i++) {
+            PyObject *val = lookup_relevant_arg(
+                    self, i, args, nargs, kwnames, nkwargs);
+            items[i] = val;
+            if (all_safe && !is_safe_arg(val)) {
+                all_safe = 0;
+            }
+        }
+
+        if (all_safe) {
+            return PyObject_Vectorcall(
+                    self->default_impl, args, len_args, kwnames);
+        }
+
+        num_implementing_args = get_implementing_args_and_methods(
+                items, self->n_relevant_args,
+                implementing_args, array_function_methods);
+        if (num_implementing_args < 0) {
+            return NULL;
+        }
+    }
+    else if (self->relevant_arg_func != NULL) {
         public_api = (PyObject *)self;
 
         /* Typical path, need to call the relevant_arg_func and unpack them */
@@ -525,7 +626,9 @@ dispatcher_vectorcall(PyArray_ArrayFunctionDispatcherObject *self,
         }
 
         num_implementing_args = get_implementing_args_and_methods(
-                relevant_args, implementing_args, array_function_methods);
+                PySequence_Fast_ITEMS(relevant_args),
+                PySequence_Fast_GET_SIZE(relevant_args),
+                implementing_args, array_function_methods);
         if (num_implementing_args < 0) {
             Py_DECREF(relevant_args);
             return NULL;
@@ -649,10 +752,11 @@ dispatcher_new(PyTypeObject *NPY_UNUSED(cls), PyObject *args, PyObject *kwargs)
         return PyErr_NoMemory();
     }
 
+    PyObject *relevant_arg_spec;
     char *kwlist[] = {"", "", NULL};
     if (!PyArg_ParseTupleAndKeywords(
             args, kwargs, "OO:_ArrayFunctionDispatcher", kwlist,
-            &self->relevant_arg_func, &self->default_impl)) {
+            &relevant_arg_spec, &self->default_impl)) {
         Py_DECREF(self);
         return NULL;
     }
@@ -662,12 +766,60 @@ dispatcher_new(PyTypeObject *NPY_UNUSED(cls), PyObject *args, PyObject *kwargs)
     self->dict = NULL;
     self->dispatcher_name = NULL;
     self->public_name = NULL;
+    self->relevant_arg_func = NULL;
+    self->relevant_arg_positions = NULL;
+    self->relevant_arg_names = NULL;
+    self->n_relevant_args = 0;
 
-    if (self->relevant_arg_func == Py_None) {
-        /* NULL in the relevant arg function means we use `like=` */
-        Py_CLEAR(self->relevant_arg_func);
+    if (relevant_arg_spec == Py_None) {
+        /* NULL relevant_arg_func means we use `like=` */
+    }
+    else if (PyTuple_CheckExact(relevant_arg_spec)) {
+        /*
+         * Fast-path spec: tuple of (name, position) pairs.
+         * Resolve interned arg names and positional indices into
+         * the implementation's signature.
+         */
+        Py_ssize_t n = PyTuple_GET_SIZE(relevant_arg_spec);
+        if (n > NPY_MAXARGS) {
+            PyErr_Format(PyExc_ValueError,
+                    "too many relevant args (%zd > %d)", n, NPY_MAXARGS);
+            Py_DECREF(self);
+            return NULL;
+        }
+        self->relevant_arg_positions = PyMem_Malloc(sizeof(int) * n);
+        self->relevant_arg_names = PyMem_Calloc(n, sizeof(PyObject *));
+        if (self->relevant_arg_positions == NULL
+                || self->relevant_arg_names == NULL) {
+            Py_DECREF(self);
+            return PyErr_NoMemory();
+        }
+        self->n_relevant_args = (int)n;
+        for (Py_ssize_t i = 0; i < n; i++) {
+            PyObject *pair = PyTuple_GET_ITEM(relevant_arg_spec, i);
+            PyObject *name;
+            int pos;
+            if (!PyArg_ParseTuple(pair, "O!i", &PyUnicode_Type, &name, &pos)) {
+                Py_DECREF(self);
+                return NULL;
+            }
+            Py_INCREF(name);
+            PyUnicode_InternInPlace(&name);
+            self->relevant_arg_names[i] = name;
+            self->relevant_arg_positions[i] = pos;
+        }
+        /* Fetch names to clean up TypeErrors (show actual name) */
+        self->public_name = PyObject_GetAttrString(
+            self->default_impl, "__qualname__");
+        if (self->public_name == NULL) {
+            Py_DECREF(self);
+            return NULL;
+        }
+        Py_INCREF(self->public_name);
+        self->dispatcher_name = self->public_name;
     }
     else {
+        self->relevant_arg_func = relevant_arg_spec;
         /* Fetch names to clean up TypeErrors (show actual name) */
         Py_INCREF(self->relevant_arg_func);
         self->dispatcher_name = PyObject_GetAttrString(
