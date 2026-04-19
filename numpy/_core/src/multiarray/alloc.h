@@ -3,6 +3,7 @@
 
 #define NPY_NO_DEPRECATED_API NPY_API_VERSION
 #define _MULTIARRAYMODULE
+#include <string.h>  /* for memset used in NPY_ALLOC_WORKSPACE_ZEROED */
 #include "numpy/ndarraytypes.h"
 
 #define NPY_TRACE_DOMAIN 389047
@@ -72,6 +73,16 @@ _npy_init_workspace(
     }
 }
 
+static inline void
+_npy_init_workspace_zeroed(
+    void **buf, void *static_buf, size_t static_buf_size, size_t elsize, size_t size)
+{
+    _npy_init_workspace(buf, static_buf, static_buf_size, elsize, size);
+    if (NPY_LIKELY(*buf != NULL)) {
+        memset(*buf, 0, size * elsize);
+    }
+}
+
 
 /*
  * Helper definition macro for a small work/scratchspace.
@@ -86,6 +97,8 @@ _npy_init_workspace(
  *     ...
  *     npy_free_workspace(arr);
  *
+ * NPY_ALLOC_WORKSPACE_ZEROED is a variant that zero-initializes the buffer.
+ *
  * Notes
  * -----
  * The reason is to avoid allocations in most cases, but gracefully
@@ -98,10 +111,16 @@ _npy_init_workspace(
     TYPE *NAME;
 #define NPY_INIT_WORKSPACE(NAME, TYPE, fixed_size, size)   \
     _npy_init_workspace((void **)&NAME, NAME##_static, (fixed_size), sizeof(TYPE), (size))
+#define NPY_INIT_WORKSPACE_ZEROED(NAME, TYPE, fixed_size, size)   \
+    _npy_init_workspace_zeroed((void **)&NAME, NAME##_static, (fixed_size), sizeof(TYPE), (size))
 
 #define NPY_ALLOC_WORKSPACE(NAME, TYPE, fixed_size, size)  \
     NPY_DEFINE_WORKSPACE(NAME, TYPE, fixed_size)            \
     NPY_INIT_WORKSPACE(NAME, TYPE, fixed_size, size)
+
+#define NPY_ALLOC_WORKSPACE_ZEROED(NAME, TYPE, fixed_size, size)  \
+    NPY_DEFINE_WORKSPACE(NAME, TYPE, fixed_size)                   \
+    NPY_INIT_WORKSPACE_ZEROED(NAME, TYPE, fixed_size, size)
 
 
 static inline void

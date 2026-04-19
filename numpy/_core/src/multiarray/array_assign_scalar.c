@@ -26,6 +26,7 @@
 
 #include "array_assign.h"
 #include "dtype_transfer.h"
+#include "alloc.h"
 
 #include "umathmodule.h"
 
@@ -246,8 +247,9 @@ PyArray_AssignRawScalar(PyArrayObject *dst,
                         PyArrayObject *wheremask,
                         NPY_CASTING casting)
 {
-    int allocated_src_data = 0;
-    npy_longlong scalarbuffer[4];
+    /* Scratch for aligned/cast src; NULL means "not allocated". */
+    NPY_DEFINE_WORKSPACE(tmp_src_data, long double, 4);
+    tmp_src_data = NULL;
 
     if (PyArray_FailUnlessWriteable(dst, "assignment destination") < 0) {
         return -1;
@@ -271,36 +273,20 @@ PyArray_AssignRawScalar(PyArrayObject *dst,
               npy_is_aligned(src_data, src_dtype->alignment))) &&
                     PyArray_SIZE(dst) > 1 &&
                     !PyDataType_REFCHK(PyArray_DESCR(dst))) {
-        char *tmp_src_data;
-
-        /*
-         * Use a static buffer to store the aligned/cast version,
-         * or allocate some memory if more space is needed.
-         */
-        if ((int)sizeof(scalarbuffer) >= PyArray_ITEMSIZE(dst)) {
-            tmp_src_data = (char *)&scalarbuffer[0];
-        }
-        else {
-            tmp_src_data = PyArray_malloc(PyArray_ITEMSIZE(dst));
-            if (tmp_src_data == NULL) {
-                PyErr_NoMemory();
-                goto fail;
-            }
-            allocated_src_data = 1;
+        size_t n_elems = (PyArray_ITEMSIZE(dst) + sizeof(long double) - 1)
+                         / sizeof(long double);
+        NPY_INIT_WORKSPACE_ZEROED(tmp_src_data, long double, 4, n_elems);
+        if (tmp_src_data == NULL) {
+            goto fail;
         }
 
-        if (PyDataType_FLAGCHK(PyArray_DESCR(dst), NPY_NEEDS_INIT)) {
-            memset(tmp_src_data, 0, PyArray_ITEMSIZE(dst));
-        }
-
-        if (PyArray_CastRawArrays(1, src_data, tmp_src_data, 0, 0,
+        if (PyArray_CastRawArrays(1, src_data, (char *)tmp_src_data, 0, 0,
                             src_dtype, PyArray_DESCR(dst), 0) != NPY_SUCCEED) {
-            src_data = tmp_src_data;
             goto fail;
         }
 
         /* Replace src_data/src_dtype */
-        src_data = tmp_src_data;
+        src_data = (char *)tmp_src_data;
         src_dtype = PyArray_DESCR(dst);
     }
 
@@ -335,16 +321,10 @@ PyArray_AssignRawScalar(PyArrayObject *dst,
         }
     }
 
-    if (allocated_src_data) {
-        PyArray_free(src_data);
-    }
-
+    npy_free_workspace(tmp_src_data);
     return 0;
 
 fail:
-    if (allocated_src_data) {
-        PyArray_free(src_data);
-    }
-
+    npy_free_workspace(tmp_src_data);
     return -1;
 }

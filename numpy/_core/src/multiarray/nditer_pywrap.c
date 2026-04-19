@@ -969,12 +969,11 @@ NpyIter_NestedIters(PyObject *NPY_UNUSED(self),
     }
 
     /* allocate workspace for Python objects (operands and dtypes) */
-    NPY_ALLOC_WORKSPACE(op, PyArrayObject *, 3 * 8, 3 * nop);
+    NPY_ALLOC_WORKSPACE_ZEROED(op, PyArrayObject *, 3 * 8, 3 * nop);
     if (op == NULL) {
         Py_DECREF(op_in_owned);
         return NULL;
     }
-    memset(op, 0, sizeof(PyObject *) * 3 * nop);
     PyArray_Descr **op_request_dtypes = (PyArray_Descr **)(op + nop);
     PyArray_Descr **op_request_dtypes_inner = op_request_dtypes + nop;
 

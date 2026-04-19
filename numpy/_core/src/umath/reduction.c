@@ -17,6 +17,7 @@
 #include "numpy/arrayobject.h"
 
 
+#include "alloc.h"
 #include "array_assign.h"
 #include "array_coercion.h"
 #include "array_method.h"
@@ -199,8 +200,8 @@ PyUFunc_ReduceWrapper(PyArrayMethod_Context *context,
     op_dtypes[0] = context->descriptors[0];
     op_dtypes[1] = context->descriptors[1];
 
-    /* Buffer to use when we need an initial value */
-    char *initial_buf = NULL;
+    /* Whether an initial value was successfully assigned to the result. */
+    int had_initial = 0;
 
     /* More than one axis means multiple orders are possible */
     if (!(context->method->flags & NPY_METH_IS_REORDERABLE)
@@ -295,49 +296,6 @@ PyUFunc_ReduceWrapper(PyArrayMethod_Context *context,
     npy_bool empty_iteration = NpyIter_GetIterSize(iter) == 0;
     result = NpyIter_GetOperandArray(iter)[0];
 
-    /*
-     * Get the initial value (if it exists).  If the iteration is empty
-     * then we assume the reduction is also empty.  The reason is that when
-     * the outer iteration is empty we just won't use the initial value
-     * in any case.  (`np.sum(np.zeros((0, 3)), axis=0)` is a length 3
-     * reduction but has an empty result.)
-     */
-    if ((initial == NULL && context->method->get_reduction_initial == NULL)
-            || initial == Py_None) {
-        /* There is no initial value, or initial value was explicitly unset */
-    }
-    else {
-        /* Not all functions will need initialization, but init always: */
-        initial_buf = PyMem_Calloc(1, op_dtypes[0]->elsize);
-        if (initial_buf == NULL) {
-            PyErr_NoMemory();
-            goto fail;
-        }
-        if (initial != NULL) {
-            /* must use user provided initial value */
-            if (PyArray_Pack(op_dtypes[0], initial_buf, initial) < 0) {
-                goto fail;
-            }
-        }
-        else {
-            /*
-             * Fetch initial from ArrayMethod, we pretend the reduction is
-             * empty when the iteration is.  This may be wrong, but when it is,
-             * we will not need the identity as the result is also empty.
-             */
-            int has_initial = context->method->get_reduction_initial(
-                    context, empty_iteration, initial_buf);
-            if (has_initial < 0) {
-                goto fail;
-            }
-            if (!has_initial) {
-                /* We have no initial value available, free buffer to indicate */
-                PyMem_FREE(initial_buf);
-                initial_buf = NULL;
-            }
-        }
-    }
-
     PyArrayMethod_StridedLoop *strided_loop;
     NPY_ARRAYMETHOD_FLAGS flags;
 
@@ -362,23 +320,58 @@ PyUFunc_ReduceWrapper(PyArrayMethod_Context *context,
         npy_clear_floatstatus_barrier((char*)&iter);
     }
 
-    /*
-     * Initialize the result to the reduction unit if possible,
-     * otherwise copy the initial values and get a view to the rest.
-     */
-    if (initial_buf != NULL) {
-        /* Loop provided an identity or default value, assign to result. */
-        int ret = raw_array_assign_scalar(
-                PyArray_NDIM(result), PyArray_DIMS(result),
-                PyArray_DESCR(result),
-                PyArray_BYTES(result), PyArray_STRIDES(result),
-                op_dtypes[0], initial_buf, NPY_UNSAFE_CASTING);
-        if (ret < 0) {
+    /* Fill the result with the initial value if applicable. */
+    if (!((initial == NULL && context->method->get_reduction_initial == NULL)
+            || initial == Py_None)) {
+        size_t n_elems = (op_dtypes[0]->elsize + sizeof(long double) - 1)
+                         / sizeof(long double);
+        NPY_ALLOC_WORKSPACE_ZEROED(initial_buf, long double, 2, n_elems);
+        if (initial_buf == NULL) {
+            goto fail;
+        }
+
+        int init_status = 0;  /* -1 error, 0 no initial, 1 have initial */
+        if (initial != NULL) {
+            if (PyArray_Pack(op_dtypes[0], initial_buf, initial) == 0) {
+                init_status = 1;
+            }
+            else {
+                init_status = -1;
+            }
+        }
+        else {
+            init_status = context->method->get_reduction_initial(
+                    context, empty_iteration, initial_buf);
+        }
+
+        if (init_status > 0) {
+            /* Assign the initial/identity value to every element of result. */
+            if (raw_array_assign_scalar(
+                    PyArray_NDIM(result), PyArray_DIMS(result),
+                    PyArray_DESCR(result),
+                    PyArray_BYTES(result), PyArray_STRIDES(result),
+                    op_dtypes[0], (char *)initial_buf,
+                    NPY_UNSAFE_CASTING) < 0) {
+                init_status = -1;
+            }
+            else {
+                had_initial = 1;
+            }
+        }
+
+        /* Clean up references in the buffer (if any) and free. */
+        if (PyDataType_REFCHK(op_dtypes[0])) {
+            PyArray_ClearBuffer(op_dtypes[0], (char *)initial_buf, 0, 1, 1);
+        }
+        npy_free_workspace(initial_buf);
+
+        if (init_status < 0) {
             goto fail;
         }
     }
-    else {
-        /* Can only use where with an initial (from identity or argument) */
+
+    if (!had_initial) {
+        /* Can only use where with an initial (from identity or argument). */
         if (wheremask != NULL) {
             PyErr_Format(PyExc_ValueError,
                     "reduction operation '%s' does not have an identity, "
@@ -434,10 +427,6 @@ PyUFunc_ReduceWrapper(PyArrayMethod_Context *context,
     }
     Py_INCREF(result);
 
-    if (initial_buf != NULL && PyDataType_REFCHK(PyArray_DESCR(result))) {
-        PyArray_ClearBuffer(PyArray_DESCR(result), initial_buf, 0, 1, 1);
-    }
-    PyMem_FREE(initial_buf);
     NPY_AUXDATA_FREE(auxdata);
     if (!NpyIter_Deallocate(iter)) {
         Py_DECREF(result);
@@ -446,10 +435,6 @@ PyUFunc_ReduceWrapper(PyArrayMethod_Context *context,
     return result;
 
 fail:
-    if (initial_buf != NULL && PyDataType_REFCHK(op_dtypes[0])) {
-        PyArray_ClearBuffer(op_dtypes[0], initial_buf, 0, 1, 1);
-    }
-    PyMem_FREE(initial_buf);
     NPY_AUXDATA_FREE(auxdata);
     if (iter != NULL) {
         NpyIter_Deallocate(iter);

@@ -4470,11 +4470,10 @@ ufunc_generic_fastcall(PyUFuncObject *ufunc,
      * Scratch space for operands, dtypes, etc.  Note that operands and
      * operation_descrs may hold an entry for the wheremask.
      */
-    NPY_ALLOC_WORKSPACE(scratch_objs, void *, UFUNC_STACK_NARGS * 4 + 2, nop * 4 + 2);
+    NPY_ALLOC_WORKSPACE_ZEROED(scratch_objs, void *, UFUNC_STACK_NARGS * 4 + 2, nop * 4 + 2);
     if (scratch_objs == NULL) {
         return NULL;
     }
-    memset(scratch_objs, 0, sizeof(void *) * (nop * 4 + 2));
 
     PyArray_DTypeMeta **signature = (PyArray_DTypeMeta **)scratch_objs;
     PyArrayObject **operands = (PyArrayObject **)(signature + nop);
