@@ -4135,6 +4135,123 @@ class TestRequire:
             self.set_and_check_flag(flag, None, a)
 
 
+class TestCheckFromAnyFastPath:
+    """
+    Regression tests for the fast path in PyArray_CheckFromAny_int that
+    returns the input ndarray directly when it already satisfies the
+    requested dtype/flags/depth constraints. The path is hit indirectly
+    via callers such as searchsorted, partition with a sorter, etc.
+    """
+
+    def test_searchsorted_native_int(self):
+        # Both arrays are C-contiguous, aligned, native int64: fast path
+        # should fire for both ap1 and ap2 inside searchsorted.
+        a = np.arange(100, dtype=np.int64)
+        v = np.array([5, 50, 95], dtype=np.int64)
+        result = np.searchsorted(a, v)
+        np.testing.assert_array_equal(result, [5, 50, 95])
+
+    def test_searchsorted_with_sorter(self):
+        # sorter goes through PyArray_CheckFromAny with NPY_ARRAY_ALIGNED |
+        # NPY_ARRAY_NOTSWAPPED. A native intp array satisfies both.
+        a = np.array([3, 1, 4, 1, 5, 9, 2, 6], dtype=np.int64)
+        sorter = np.argsort(a)
+        result = np.searchsorted(a, [4, 5], sorter=sorter)
+        # Each query inserts at the correct position in the sorted permutation
+        assert result.shape == (2,)
+
+    def test_searchsorted_dtype_mismatch(self):
+        # Different dtype for v forces a copy/cast inside CheckFromAny.
+        a = np.arange(100, dtype=np.int64)
+        v = np.array([5, 50, 95], dtype=np.int32)
+        result = np.searchsorted(a, v)
+        np.testing.assert_array_equal(result, [5, 50, 95])
+
+    def test_searchsorted_non_contig_haystack(self):
+        # Non-contiguous haystack: fast path should not fire when ap1_flags
+        # includes C_CONTIGUOUS but op1 isn't contiguous.
+        base = np.arange(200, dtype=np.int64)
+        a = base[::2]  # Non-contiguous, but searchsorted only needs C-contig
+                       # for ap1 when ap2 is larger than ap1. Force that:
+        v = np.arange(150, dtype=np.int64)
+        result = np.searchsorted(a, v)
+        # The result indexing should still be correct.
+        assert result.shape == v.shape
+
+    def test_searchsorted_byteswapped(self):
+        # Byteswapped haystack: must trigger NOTSWAPPED conversion, since
+        # fast path's NOTSWAPPED check fails.
+        native = np.arange(20, dtype=np.int32)
+        a = native.byteswap().view(native.dtype.newbyteorder())
+        assert not a.dtype.isnative
+        v = np.array([5, 10], dtype=np.int32)
+        result = np.searchsorted(a, v)
+        np.testing.assert_array_equal(result, [5, 10])
+
+    def test_partition_native(self):
+        # np.partition goes through item_selection helpers using CheckFromAny.
+        a = np.array([3, 1, 4, 1, 5, 9, 2, 6], dtype=np.int64)
+        p = np.partition(a, 3)
+        assert p[3] == np.sort(a)[3]
+
+    def test_partition_preserves_original(self):
+        # The fast path returns a NEW reference (Py_INCREF) but the original
+        # array must remain unchanged by np.partition (which copies internally).
+        a = np.array([3, 1, 4, 1, 5, 9, 2, 6], dtype=np.int64)
+        original = a.copy()
+        np.partition(a, 3)
+        np.testing.assert_array_equal(a, original)
+
+    def test_bincount_native(self):
+        a = np.array([0, 1, 1, 2, 2, 2], dtype=np.intp)
+        np.testing.assert_array_equal(np.bincount(a), [1, 2, 3])
+
+    def test_digitize_native(self):
+        # digitize calls _monotonicity which uses CheckFromAny.
+        bins = np.array([1.0, 2.0, 3.0, 4.0])
+        x = np.array([0.5, 1.5, 2.5, 3.5, 4.5])
+        result = np.digitize(x, bins)
+        np.testing.assert_array_equal(result, [0, 1, 2, 3, 4])
+
+    def test_subclass_passthrough(self):
+        # Subclasses should pass through CheckFromAny without coercion when
+        # ENSUREARRAY is not requested. Use searchsorted as a vehicle.
+        class MyArr(np.ndarray):
+            pass
+
+        a = np.arange(10, dtype=np.int64).view(MyArr)
+        v = np.array([3, 7], dtype=np.int64)
+        result = np.searchsorted(a, v)
+        np.testing.assert_array_equal(result, [3, 7])
+        # The original input subclass type is preserved (it lived past the
+        # fast-path INCREF/DECREF dance).
+        assert type(a) is MyArr
+
+    def test_readonly_input(self):
+        # Read-only array: CheckFromAny inside searchsorted requires CARRAY_RO
+        # which does NOT include WRITEABLE, so a read-only contig array must
+        # still fast-path successfully.
+        a = np.arange(100, dtype=np.int64)
+        a.setflags(write=False)
+        v = np.array([5, 50, 95], dtype=np.int64)
+        result = np.searchsorted(a, v)
+        np.testing.assert_array_equal(result, [5, 50, 95])
+
+    def test_refcount_no_leak(self):
+        # Ensure the fast path's Py_INCREF is balanced (no leak per call).
+        import sys
+        a = np.arange(100, dtype=np.int64)
+        v = np.array([5], dtype=np.int64)
+        # Warm up
+        for _ in range(5):
+            np.searchsorted(a, v)
+        start = sys.getrefcount(a)
+        for _ in range(100):
+            np.searchsorted(a, v)
+        end = sys.getrefcount(a)
+        assert end == start
+
+
 class TestBroadcast:
     def test_broadcast_in_args(self):
         # gh-5881

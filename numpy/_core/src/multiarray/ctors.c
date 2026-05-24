@@ -1796,6 +1796,47 @@ PyArray_CheckFromAny_int(PyObject *op, PyArray_Descr *in_descr,
                          int max_depth, int requirements)
 {
     PyObject *obj;
+    /*
+     * Fast path: op is already an ndarray that satisfies the requested dtype,
+     * shape and layout constraints, so we can return it directly and skip
+     * DiscoverDTypeAndShape + casting. Request-only flags that force a copy
+     * (ENSURECOPY, FORCECAST, ENSURENOCOPY) or change the Python type
+     * (ENSUREARRAY for non-base subclasses) are excluded. NOTSWAPPED and
+     * ELEMENTSTRIDES are checked explicitly since they are not array flags.
+     */
+    static const int CHECKFROMANY_DISALLOWED = (
+            NPY_ARRAY_ENSURECOPY | NPY_ARRAY_FORCECAST
+            | NPY_ARRAY_ENSURENOCOPY);
+    static const int CHECKFROMANY_REAL_FLAGS = (
+            NPY_ARRAY_C_CONTIGUOUS | NPY_ARRAY_F_CONTIGUOUS
+            | NPY_ARRAY_ALIGNED | NPY_ARRAY_WRITEABLE
+            | NPY_ARRAY_OWNDATA | NPY_ARRAY_WRITEBACKIFCOPY);
+    if (PyArray_Check(op)
+            && !(requirements & CHECKFROMANY_DISALLOWED)
+            && !((requirements & NPY_ARRAY_ENSUREARRAY)
+                    && !PyArray_CheckExact(op))) {
+        PyArrayObject *arr = (PyArrayObject *)op;
+        int nd = PyArray_NDIM(arr);
+        int real_req = requirements & CHECKFROMANY_REAL_FLAGS;
+        /*
+         * If in_descr is set we require an exact pointer match; that also
+         * implies the DType matches so in_DType need not be checked.  If
+         * in_descr is unset, in_DType must also be unset.
+         */
+        if ((in_descr != NULL
+                    ? in_descr == PyArray_DESCR(arr)
+                    : in_DType == NULL)
+                && nd >= min_depth
+                && nd <= max_depth
+                && (PyArray_FLAGS(arr) & real_req) == real_req
+                && !((requirements & NPY_ARRAY_NOTSWAPPED)
+                        && PyArray_ISBYTESWAPPED(arr))
+                && !((requirements & NPY_ARRAY_ELEMENTSTRIDES)
+                        && !PyArray_ElementStrides(op))) {
+            Py_INCREF(arr);
+            return (PyObject *)arr;
+        }
+    }
     Py_XINCREF(in_descr);  /* take ownership as we may replace it */
     if (requirements & NPY_ARRAY_NOTSWAPPED) {
         if (!in_descr && PyArray_Check(op)) {
