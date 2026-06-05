@@ -1,0 +1,403 @@
+· Creating environments
+· Discovering benchmarks
+·· Uninstalling from virtualenv-py3.13-Cython-build-packaging
+·· Installing 45105175 <reduction_contiguous_fast_path> into virtualenv-py3.13-Cython-build-packaging
+· Running 42 total benchmarks (2 commits * 1 environments * 21 benchmarks)
+[ 0.00%] · For numpy commit 12e16ab3 <main> (round 1/2):
+[ 0.00%] ·· Building for virtualenv-py3.13-Cython-build-packaging
+[ 0.00%] ·· Benchmarking virtualenv-py3.13-Cython-build-packaging
+[ 1.19%] ··· Running (bench_reduce.AddReduce.time_axis_0--)...
+[ 4.76%] ··· Running (bench_reduce.AnyAll.time_all_fast--).....
+[10.71%] ··· Running (bench_reduce.ArgMin.time_argmin--)..
+[13.10%] ··· Running (bench_reduce.FMinMax.time_min--)......
+[20.24%] ··· Running (bench_reduce.StatsReductions.time_mean--)...
+[23.81%] ··· Running (bench_reduce.StatsReductions.time_std--)..
+[25.00%] · For numpy commit 45105175 <reduction_contiguous_fast_path> (round 1/2):
+[25.00%] ·· Building for virtualenv-py3.13-Cython-build-packaging
+[25.00%] ·· Benchmarking virtualenv-py3.13-Cython-build-packaging
+[26.19%] ··· Running (bench_reduce.AddReduce.time_axis_0--)...
+[29.76%] ··· Running (bench_reduce.AnyAll.time_all_fast--).....
+[35.71%] ··· Running (bench_reduce.ArgMin.time_argmin--)...
+[39.29%] ··· Running (bench_reduce.SmallReduction.time_any--)......
+[46.43%] ··· Running (bench_reduce.StatsReductions.time_min--)...
+[50.00%] ··· Running (bench_reduce.StatsReductions.time_var--).
+[50.00%] · For numpy commit 45105175 <reduction_contiguous_fast_path> (round 2/2):
+[50.00%] ·· Benchmarking virtualenv-py3.13-Cython-build-packaging
+[51.19%] ··· bench_reduce.AddReduce.time_axis_0                      7.12±0.1ms
+[52.38%] ··· bench_reduce.AddReduce.time_axis_1                      5.82±0.1ms
+[53.57%] ··· bench_reduce.AddReduceSeparate.time_reduce                      ok
+[53.57%] ··· ====== ============ ============
+              axis      type                 
+             ------ ------------ ------------
+               0       int16      352±0.2μs  
+               0      float16      3.50±0ms  
+               0       int32      336±0.8μs  
+               0      float32      104±3μs   
+               0       int64       213±1μs   
+               0      float64     165±0.4μs  
+               0     complex64    184±0.7μs  
+               0     complex128    389±1μs   
+               1       int16      290±0.3μs  
+               1      float16      2.36±0ms  
+               1       int32       269±2μs   
+               1      float32     178±0.04μs 
+               1       int64      175±0.9μs  
+               1      float64      196±5μs   
+               1     complex64    340±0.1μs  
+               1     complex128    446±5μs   
+             ====== ============ ============
+
+[54.76%] ··· bench_reduce.AnyAll.time_all_fast                        414±0.5ns
+[55.95%] ··· bench_reduce.AnyAll.time_all_slow                         2.24±0μs
+[57.14%] ··· bench_reduce.AnyAll.time_any_fast                        413±0.9ns
+[58.33%] ··· bench_reduce.AnyAll.time_any_slow                       2.14±0.1μs
+[59.52%] ··· bench_reduce.ArgMax.time_argmax                                 ok
+[59.52%] ··· =============== ============
+                  dtype                  
+             --------------- ------------
+                numpy.int8    5.47±0.2μs 
+               numpy.uint8    7.46±0.2μs 
+               numpy.int16    9.03±0.3μs 
+               numpy.uint16   12.9±0.3μs 
+               numpy.int32    17.1±0.6μs 
+               numpy.uint32   24.5±0.5μs 
+               numpy.int64    44.2±0.5μs 
+               numpy.uint64   49.4±0.7μs 
+              numpy.float32   23.3±0.2μs 
+              numpy.float64    46.3±1μs  
+                   bool       3.25±0.5μs 
+             =============== ============
+
+[60.71%] ··· bench_reduce.ArgMin.time_argmin                                 ok
+[60.71%] ··· =============== =============
+                  dtype                   
+             --------------- -------------
+                numpy.int8     5.38±0.2μs 
+               numpy.uint8     7.51±0.2μs 
+               numpy.int16     9.03±0.3μs 
+               numpy.uint16    12.8±0.3μs 
+               numpy.int32     17.3±0.6μs 
+               numpy.uint32    24.8±0.6μs 
+               numpy.int64     42.6±0.8μs 
+               numpy.uint64     50.0±1μs  
+              numpy.float32    23.5±0.2μs 
+              numpy.float64     46.7±2μs  
+                   bool       3.22±0.01μs 
+             =============== =============
+
+[61.90%] ··· bench_reduce.FMinMax.time_max                                   ok
+[61.90%] ··· =============== =============
+                  dtype                   
+             --------------- -------------
+              numpy.float32   2.23±0.01μs 
+              numpy.float64   3.48±0.02μs 
+             =============== =============
+
+[63.10%] ··· bench_reduce.FMinMax.time_min                                   ok
+[63.10%] ··· =============== =============
+                  dtype                   
+             --------------- -------------
+              numpy.float32   2.22±0.01μs 
+              numpy.float64    3.68±0.2μs 
+             =============== =============
+
+[64.29%] ··· bench_reduce.SmallReduction.time_any                            ok
+[64.29%] ··· ====== =============
+              size               
+             ------ -------------
+               4     1.02±0.02μs 
+              100    1.03±0.02μs 
+             ====== =============
+
+[65.48%] ··· bench_reduce.SmallReduction.time_max                            ok
+[65.48%] ··· ====== =============
+              size               
+             ------ -------------
+               4     1.60±0.01μs 
+              100    1.60±0.01μs 
+             ====== =============
+
+[66.67%] ··· bench_reduce.SmallReduction.time_sum                            ok
+[66.67%] ··· ====== =============
+              size               
+             ------ -------------
+               4     1.20±0.01μs 
+              100    1.19±0.02μs 
+             ====== =============
+
+[67.86%] ··· bench_reduce.SmallReduction2D.time_sum_axis_1          1.60±0.02μs
+[69.05%] ··· bench_reduce.StatsReductions.time_max                           ok
+[69.05%] ··· =========== =============
+                dtype                 
+             ----------- -------------
+                int64     1.64±0.02μs 
+                uint64    1.63±0.02μs 
+               float32    1.59±0.03μs 
+               float64    1.61±0.04μs 
+              complex64   2.17±0.02μs 
+                bool_     1.57±0.04μs 
+             =========== =============
+
+[70.24%] ··· bench_reduce.StatsReductions.time_mean                          ok
+[70.24%] ··· =========== =============
+                dtype                 
+             ----------- -------------
+                int64     2.57±0.06μs 
+                uint64    2.65±0.04μs 
+               float32    3.29±0.04μs 
+               float64    1.88±0.02μs 
+              complex64   3.38±0.04μs 
+                bool_     2.57±0.06μs 
+             =========== =============
+
+[71.43%] ··· bench_reduce.StatsReductions.time_min                           ok
+[71.43%] ··· =========== =============
+                dtype                 
+             ----------- -------------
+                int64     1.61±0.04μs 
+                uint64    1.60±0.03μs 
+               float32    1.60±0.03μs 
+               float64    1.61±0.01μs 
+              complex64   2.17±0.03μs 
+                bool_     1.56±0.03μs 
+             =========== =============
+
+[72.62%] ··· bench_reduce.StatsReductions.time_prod                          ok
+[72.62%] ··· =========== =============
+                dtype                 
+             ----------- -------------
+                int64     1.25±0.02μs 
+                uint64    1.25±0.02μs 
+               float32    1.35±0.02μs 
+               float64    1.35±0.02μs 
+              complex64   2.10±0.02μs 
+                bool_     1.79±0.01μs 
+             =========== =============
+
+[73.81%] ··· bench_reduce.StatsReductions.time_std                           ok
+[73.81%] ··· =========== =============
+                dtype                 
+             ----------- -------------
+                int64     7.23±0.05μs 
+                uint64     7.32±0.1μs 
+               float32    8.31±0.06μs 
+               float64    6.50±0.05μs 
+              complex64    10.4±0.1μs 
+                bool_     7.70±0.07μs 
+             =========== =============
+
+[75.00%] ··· bench_reduce.StatsReductions.time_var                           ok
+[75.00%] ··· =========== =============
+                dtype                 
+             ----------- -------------
+                int64     6.90±0.05μs 
+                uint64    7.02±0.05μs 
+               float32    7.77±0.09μs 
+               float64    6.22±0.04μs 
+              complex64    9.91±0.1μs 
+                bool_     7.36±0.08μs 
+             =========== =============
+
+[75.00%] · For numpy commit 12e16ab3 <main> (round 2/2):
+[75.00%] ·· Building for virtualenv-py3.13-Cython-build-packaging
+[75.00%] ·· Benchmarking virtualenv-py3.13-Cython-build-packaging
+[76.19%] ··· bench_reduce.AddReduce.time_axis_0                      7.17±0.2ms
+[77.38%] ··· bench_reduce.AddReduce.time_axis_1                      6.07±0.1ms
+[78.57%] ··· bench_reduce.AddReduceSeparate.time_reduce                      ok
+[78.57%] ··· ====== ============ ===========
+              axis      type                
+             ------ ------------ -----------
+               0       int16      352±0.1μs 
+               0      float16      3.50±0ms 
+               0       int32       354±6μs  
+               0      float32      106±2μs  
+               0       int64       225±1μs  
+               0      float64      189±1μs  
+               0     complex64     186±6μs  
+               0     complex128    408±10μs 
+               1       int16      291±0.4μs 
+               1      float16      2.36±0ms 
+               1       int32       270±1μs  
+               1      float32     178±0.6μs 
+               1       int64       185±2μs  
+               1      float64      200±5μs  
+               1     complex64    340±0.6μs 
+               1     complex128    450±8μs  
+             ====== ============ ===========
+
+[79.76%] ··· bench_reduce.AnyAll.time_all_fast                          781±3ns
+[80.95%] ··· bench_reduce.AnyAll.time_all_slow                       2.67±0.1μs
+[82.14%] ··· bench_reduce.AnyAll.time_any_fast                          790±1ns
+[83.33%] ··· bench_reduce.AnyAll.time_any_slow                       2.51±0.1μs
+[84.52%] ··· bench_reduce.ArgMax.time_argmax                                 ok
+[84.52%] ··· =============== ============
+                  dtype                  
+             --------------- ------------
+                numpy.int8    5.74±0.2μs 
+               numpy.uint8    7.33±0.2μs 
+               numpy.int16    9.02±0.4μs 
+               numpy.uint16   12.8±0.3μs 
+               numpy.int32    17.0±0.5μs 
+               numpy.uint32   24.6±0.5μs 
+               numpy.int64    44.3±0.4μs 
+               numpy.uint64   49.4±0.7μs 
+              numpy.float32   23.3±0.2μs 
+              numpy.float64   46.0±0.7μs 
+                   bool       3.36±0.5μs 
+             =============== ============
+
+[85.71%] ··· bench_reduce.ArgMin.time_argmin                                 ok
+[85.71%] ··· =============== =============
+                  dtype                   
+             --------------- -------------
+                numpy.int8     5.52±0.2μs 
+               numpy.uint8     7.77±0.5μs 
+               numpy.int16     9.16±0.3μs 
+               numpy.uint16    14.0±0.8μs 
+               numpy.int32     17.3±0.5μs 
+               numpy.uint32    24.9±0.6μs 
+               numpy.int64     42.5±0.6μs 
+               numpy.uint64     50.0±1μs  
+              numpy.float32    23.5±0.3μs 
+              numpy.float64    46.6±0.6μs 
+                   bool       3.19±0.03μs 
+             =============== =============
+
+[86.90%] ··· bench_reduce.FMinMax.time_max                                   ok
+[86.90%] ··· =============== =============
+                  dtype                   
+             --------------- -------------
+              numpy.float32   2.25±0.01μs 
+              numpy.float64   3.48±0.02μs 
+             =============== =============
+
+[88.10%] ··· bench_reduce.FMinMax.time_min                                   ok
+[88.10%] ··· =============== =============
+                  dtype                   
+             --------------- -------------
+              numpy.float32   2.22±0.01μs 
+              numpy.float64   3.50±0.02μs 
+             =============== =============
+
+[89.29%] ··· bench_reduce.SmallReduction.time_any                            ok
+[89.29%] ··· ====== =============
+              size               
+             ------ -------------
+               4     1.40±0.01μs 
+              100      1.40±0μs  
+             ====== =============
+
+[90.48%] ··· bench_reduce.SmallReduction.time_max                            ok
+[90.48%] ··· ====== =============
+              size               
+             ------ -------------
+               4     1.56±0.01μs 
+              100    1.56±0.01μs 
+             ====== =============
+
+[91.67%] ··· bench_reduce.SmallReduction.time_sum                            ok
+[91.67%] ··· ====== =============
+              size               
+             ------ -------------
+               4       1.56±0μs  
+              100    1.54±0.01μs 
+             ====== =============
+
+[92.86%] ··· bench_reduce.SmallReduction2D.time_sum_axis_1          1.60±0.01μs
+[94.05%] ··· bench_reduce.StatsReductions.time_max                           ok
+[94.05%] ··· =========== =============
+                dtype                 
+             ----------- -------------
+                int64     1.59±0.02μs 
+                uint64    1.59±0.01μs 
+               float32    1.57±0.01μs 
+               float64    1.58±0.01μs 
+              complex64   2.12±0.01μs 
+                bool_     1.55±0.02μs 
+             =========== =============
+
+[95.24%] ··· bench_reduce.StatsReductions.time_mean                          ok
+[95.24%] ··· =========== =============
+                dtype                 
+             ----------- -------------
+                int64     2.53±0.02μs 
+                uint64    2.56±0.02μs 
+               float32    3.68±0.02μs 
+               float64    2.21±0.01μs 
+              complex64   3.70±0.02μs 
+                bool_     2.47±0.01μs 
+             =========== =============
+
+[96.43%] ··· bench_reduce.StatsReductions.time_min                           ok
+[96.43%] ··· =========== =============
+                dtype                 
+             ----------- -------------
+                int64     1.57±0.01μs 
+                uint64    1.58±0.01μs 
+               float32    1.58±0.01μs 
+               float64    1.57±0.01μs 
+              complex64   2.12±0.01μs 
+                bool_     1.55±0.01μs 
+             =========== =============
+
+[97.62%] ··· bench_reduce.StatsReductions.time_prod                          ok
+[97.62%] ··· =========== =============
+                dtype                 
+             ----------- -------------
+                int64     1.59±0.01μs 
+                uint64      1.63±0μs  
+               float32      1.68±0μs  
+               float64    1.67±0.02μs 
+              complex64     2.44±0μs  
+                bool_     1.77±0.01μs 
+             =========== =============
+
+[98.81%] ··· bench_reduce.StatsReductions.time_std                           ok
+[98.81%] ··· =========== =============
+                dtype                 
+             ----------- -------------
+                int64       7.56±0μs  
+                uint64    7.68±0.02μs 
+               float32    8.61±0.03μs 
+               float64    6.81±0.01μs 
+              complex64   10.4±0.01μs 
+                bool_     8.04±0.04μs 
+             =========== =============
+
+[100.00%] ··· bench_reduce.StatsReductions.time_var                           ok
+[100.00%] ··· =========== =============
+                 dtype                 
+              ----------- -------------
+                 int64     7.19±0.03μs 
+                 uint64    7.23±0.03μs 
+                float32    8.09±0.01μs 
+                float64    6.43±0.03μs 
+               complex64   9.85±0.01μs 
+                 bool_     7.61±0.01μs 
+              =========== =============
+
+| Change   | Before [12e16ab3] <main>   | After [45105175] <reduction_contiguous_fast_path>   |   Ratio | Benchmark (Parameter)                                    |
+|----------|----------------------------|-----------------------------------------------------|---------|----------------------------------------------------------|
+| -        | 354±6μs                    | 336±0.8μs                                           |    0.95 | bench_reduce.AddReduceSeparate.time_reduce(0, 'int32')   |
+| -        | 225±1μs                    | 213±1μs                                             |    0.95 | bench_reduce.AddReduceSeparate.time_reduce(0, 'int64')   |
+| -        | 185±2μs                    | 175±0.9μs                                           |    0.95 | bench_reduce.AddReduceSeparate.time_reduce(1, 'int64')   |
+| -        | 3.70±0.02μs                | 3.38±0.04μs                                         |    0.91 | bench_reduce.StatsReductions.time_mean('complex64')      |
+| -        | 3.68±0.02μs                | 3.29±0.04μs                                         |    0.89 | bench_reduce.StatsReductions.time_mean('float32')        |
+| -        | 189±1μs                    | 165±0.4μs                                           |    0.87 | bench_reduce.AddReduceSeparate.time_reduce(0, 'float64') |
+| -        | 2.44±0μs                   | 2.10±0.02μs                                         |    0.86 | bench_reduce.StatsReductions.time_prod('complex64')      |
+| -        | 2.51±0.1μs                 | 2.14±0.1μs                                          |    0.85 | bench_reduce.AnyAll.time_any_slow                        |
+| -        | 2.21±0.01μs                | 1.88±0.02μs                                         |    0.85 | bench_reduce.StatsReductions.time_mean('float64')        |
+| -        | 2.67±0.1μs                 | 2.24±0μs                                            |    0.84 | bench_reduce.AnyAll.time_all_slow                        |
+| -        | 1.67±0.02μs                | 1.35±0.02μs                                         |    0.81 | bench_reduce.StatsReductions.time_prod('float64')        |
+| -        | 1.68±0μs                   | 1.35±0.02μs                                         |    0.8  | bench_reduce.StatsReductions.time_prod('float32')        |
+| -        | 1.59±0.01μs                | 1.25±0.02μs                                         |    0.78 | bench_reduce.StatsReductions.time_prod('int64')          |
+| -        | 1.54±0.01μs                | 1.19±0.02μs                                         |    0.77 | bench_reduce.SmallReduction.time_sum(100)                |
+| -        | 1.56±0μs                   | 1.20±0.01μs                                         |    0.77 | bench_reduce.SmallReduction.time_sum(4)                  |
+| -        | 1.63±0μs                   | 1.25±0.02μs                                         |    0.77 | bench_reduce.StatsReductions.time_prod('uint64')         |
+| -        | 1.40±0μs                   | 1.03±0.02μs                                         |    0.73 | bench_reduce.SmallReduction.time_any(100)                |
+| -        | 1.40±0.01μs                | 1.02±0.02μs                                         |    0.73 | bench_reduce.SmallReduction.time_any(4)                  |
+| -        | 781±3ns                    | 414±0.5ns                                           |    0.53 | bench_reduce.AnyAll.time_all_fast                        |
+| -        | 790±1ns                    | 413±0.9ns                                           |    0.52 | bench_reduce.AnyAll.time_any_fast                        |
+
+SOME BENCHMARKS HAVE CHANGED SIGNIFICANTLY.
+PERFORMANCE INCREASED.

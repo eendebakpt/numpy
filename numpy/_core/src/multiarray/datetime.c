@@ -16,7 +16,8 @@
 #include "numpyos.h"
 
 #include "npy_config.h"
-
+#include "npy_pycompat.h"  // PyObject_GetOptionalAttr
+#include "npy_static_data.h"
 
 #include "common.h"
 #include "numpy/arrayscalars.h"
@@ -2242,20 +2243,18 @@ validate_and_return:
     }
 
     /* Apply the time zone offset if it exists */
-    if (apply_tzinfo && PyObject_HasAttrString(obj, "tzinfo")) {
-        tmp = PyObject_GetAttrString(obj, "tzinfo");
-        if (tmp == NULL) {
+    if (apply_tzinfo) {
+        int found = PyObject_GetOptionalAttr(obj, npy_interned_str.tzinfo, &tmp);
+        if (found < 0) {
             return -1;
         }
-        if (tmp == Py_None) {
-            Py_DECREF(tmp);
-        }
-        else {
+        if (found && tmp != Py_None) {
             PyObject *offset;
             int seconds_offset, minutes_offset;
             if (PyErr_WarnEx(PyExc_UserWarning,
                 "no explicit representation of timezones available for np.datetime64",
                 1) < 0) {
+                    Py_DECREF(tmp);
                     return -1;
                 }
 
@@ -2290,6 +2289,10 @@ validate_and_return:
             minutes_offset = seconds_offset / 60;
 
             add_minutes_to_datetimestruct(out, -minutes_offset);
+        }
+        else {
+            /* tmp is None (or NULL when the attribute is absent) */
+            Py_XDECREF(tmp);
         }
     }
 

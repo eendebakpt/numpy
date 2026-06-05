@@ -1,0 +1,10 @@
+Faster conversion of Python ``datetime``/``date`` objects to ``datetime64``
+---------------------------------------------------------------------------
+Converting arrays of Python :class:`datetime.datetime` or
+:class:`datetime.date` objects to ``datetime64`` (for example via
+``np.asarray(list_of_datetimes).astype("datetime64[us]")``) is now
+significantly faster.  The date and time fields are read directly from the
+object using the CPython ``datetime`` C-API instead of performing a series of
+Python attribute lookups per element.  Subclasses such as ``pandas.Timestamp``
+benefit from the same fast path; arbitrary duck-typed objects exposing
+``year``/``month``/``day`` attributes continue to work unchanged.

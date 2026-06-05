@@ -1,0 +1,252 @@
+@startuml numpy_c_api
+
+title NumPy Core C API - Object Relationships
+skinparam classAttributeIconSize 0
+skinparam classFontSize 12
+skinparam defaultFontSize 11
+skinparam linetype ortho
+
+' ============================================================
+' Legend
+' ============================================================
+legend top left
+  |= Symbol |= Meaning |
+  | <color:blue>Blue</color> | Core array/dtype objects |
+  | <color:green>Green</color> | Ufunc & loop machinery |
+  | <color:gray>Gray</color> | Legacy / support structures |
+  | //italic// | Python-level name |
+endlegend
+
+' ============================================================
+' Core Array & DType objects
+' ============================================================
+
+package "Array & DType (core)" <<Rectangle>> #EEF {
+
+  class "PyArrayObject_fields\n//np.ndarray//" as PyArrayObject #CCE0FF {
+    +PyObject_HEAD
+    +char *data
+    +int nd
+    +npy_intp *dimensions
+    +npy_intp *strides
+    +PyObject *base
+    +PyArray_Descr *descr
+    +int flags
+    +PyObject *mem_handler
+  }
+
+  class "PyArray_Descr\n//np.dtype//" as PyArrayDescr #CCE0FF {
+    +PyObject_HEAD
+    +PyTypeObject *typeobj
+    +char kind
+    +char type
+    +char byteorder
+    +int type_num
+    +npy_uint64 flags
+    +npy_intp elsize
+    +npy_intp alignment
+    +PyObject *metadata
+  }
+
+  class "_PyArray_LegacyDescr\n(extends PyArray_Descr)" as LegacyDescr #D0D0D0 {
+    +struct _arr_descr *subarray
+    +PyObject *fields
+    +PyObject *names
+    +NpyAuxData *c_metadata
+  }
+
+  class "PyArray_DTypeMeta\n//type(np.dtype)//" as DTypeMeta #CCE0FF {
+    +PyHeapTypeObject super
+    +PyArray_Descr *singleton
+    +int type_num
+    +PyTypeObject *scalar_type
+    +npy_uint64 flags
+    +void *dt_slots
+  }
+}
+
+' ============================================================
+' Ufunc & ArrayMethod objects
+' ============================================================
+
+package "Ufunc & Loop Dispatch" <<Rectangle>> #EFE {
+
+  class "PyUFuncObject\n//np.ufunc//" as PyUFuncObject #C0F0C0 {
+    +PyObject_HEAD
+    +int nin, nout, nargs
+    +int identity
+    +PyUFuncGenericFunction *functions
+    +void *const *data
+    +int ntypes
+    +const char *name
+    +const char *types
+    +int core_enabled
+    +char *core_signature
+    +void *_dispatch_cache
+    +PyObject *_loops
+  }
+
+  class "PyArrayMethodObject\n//np.ufunc (internal)//" as PyArrayMethodObject #C0F0C0 {
+    +PyObject_HEAD
+    +char *name
+    +int nin, nout
+    +NPY_CASTING casting
+    +NPY_ARRAYMETHOD_FLAGS flags
+    +void *static_data
+    ..resolve..
+    +resolve_descriptors()
+    +resolve_descriptors_with_scalars()
+    ..loop implementations..
+    +get_strided_loop()
+    +strided_loop()
+    +contiguous_loop()
+    +unaligned_strided_loop()
+    +unaligned_contiguous_loop()
+    +contiguous_indexed_loop()
+    ..legacy wrapping..
+    +PyArrayMethodObject *wrapped_meth
+    +PyArray_DTypeMeta **wrapped_dtypes
+    +void *legacy_loop
+  }
+
+  class "PyBoundArrayMethodObject" as BoundMethod #C0F0C0 {
+    +PyObject_HEAD
+    +PyArray_DTypeMeta **dtypes
+    +PyArrayMethodObject *method
+  }
+
+  class "PyArrayMethod_Context" as MethodContext #C0F0C0 {
+    +PyObject *caller
+    +PyArrayMethodObject *method
+    +PyArray_Descr **descriptors
+  }
+}
+
+' ============================================================
+' Function pointer types
+' ============================================================
+
+package "Function Pointer Types" <<Rectangle>> #FFE {
+
+  class "<<typedef>>\nPyUFuncGenericFunction" as GenericFunc #FFFACD {
+    void (*)(
+      char **args,
+      npy_intp const *dimensions,
+      npy_intp const *strides,
+      void *innerloopdata
+    )
+  }
+
+  class "<<typedef>>\nPyArrayMethod_StridedLoop" as StridedLoop #FFFACD {
+    int (*)(
+      PyArrayMethod_Context *context,
+      char *const *data,
+      const npy_intp *dimensions,
+      const npy_intp *strides,
+      NpyAuxData *auxdata
+    )
+  }
+}
+
+' ============================================================
+' Legacy support
+' ============================================================
+
+package "Legacy Support" <<Rectangle>> #EEE {
+
+  class "PyArray_ArrFuncs\n(legacy per-dtype ops)" as ArrFuncs #D0D0D0 {
+    +cast[NPY_NTYPES]
+    +getitem()
+    +setitem()
+    +copyswapn()
+    +copyswap()
+    +compare()
+    +argmax() / argmin()
+    +dotfunc()
+    +fill()
+    +sort[] / argsort[]
+    +nonzero()
+  }
+}
+
+' ============================================================
+' Relationships
+' ============================================================
+
+' Array -> Descr
+PyArrayObject "1" *--> "1" PyArrayDescr : descr
+
+' DTypeMeta is metaclass of Descr
+DTypeMeta "1" ..> "*" PyArrayDescr : <<metaclass>>\nNPY_DTYPE(descr)
+DTypeMeta "1" --> "0..1" PyArrayDescr : singleton
+
+' Legacy Descr extends Descr
+LegacyDescr --|> PyArrayDescr
+
+' UFunc contains legacy function pointers
+PyUFuncObject "1" o--> "*" GenericFunc : functions[]
+
+' UFunc holds loop registry (_loops)
+PyUFuncObject "1" o--> "*" PyArrayMethodObject : _loops\n(dtype_tuple, method)
+
+' ArrayMethod uses DTypeMeta
+PyArrayMethodObject "*" --> "*" DTypeMeta : wrapped_dtypes
+
+' ArrayMethod wraps legacy loops
+PyArrayMethodObject "0..1" --> "0..1" GenericFunc : legacy_loop\n(wrapped)
+
+' ArrayMethod can wrap another ArrayMethod
+PyArrayMethodObject "0..1" --> "0..1" PyArrayMethodObject : wrapped_meth
+
+' ArrayMethod has strided loop implementations
+PyArrayMethodObject --> StridedLoop : strided_loop\ncontiguous_loop\netc.
+
+' BoundMethod binds method + dtypes
+BoundMethod "*" --> "1" PyArrayMethodObject : method
+BoundMethod "*" --> "*" DTypeMeta : dtypes[]
+
+' MethodContext references
+MethodContext --> PyArrayMethodObject : method
+MethodContext --> PyArrayDescr : descriptors[]
+MethodContext ..> PyUFuncObject : caller\n(typically)
+
+' Legacy ArrFuncs
+LegacyDescr ..> ArrFuncs : f (legacy)
+
+' ============================================================
+' Notes
+' ============================================================
+
+note right of PyArrayObject
+  **Python:** <code>np.ndarray</code>
+  The core N-dimensional array.
+  <code>descr</code> points to the dtype
+  describing element type & layout.
+end note
+
+note right of DTypeMeta
+  **Python:** <code>type(np.dtype(...))</code>
+  Metaclass introduced in NumPy 1.20+
+  to support new DType system.
+  Accessed via <code>NPY_DTYPE(descr)</code>.
+end note
+
+note bottom of PyUFuncObject
+  **Python:** <code>np.add</code>, <code>np.multiply</code>, etc.
+  Legacy loops stored in <code>functions[]</code>.
+  New-style loops registered in <code>_loops</code>
+  as (dtype_tuple, ArrayMethod) pairs.
+end note
+
+note bottom of PyArrayMethodObject
+  Replaces legacy per-type loop registration.
+  Can wrap a <code>PyUFuncGenericFunction</code>
+  for backward compatibility.
+end note
+
+note right of ArrFuncs
+  Being phased out in favor of
+  the ArrayMethod dispatch system.
+end note
+
+@enduml

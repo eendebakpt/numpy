@@ -1,0 +1,96 @@
+
+All benchmarks:
+
+| Change   | Before [12e16ab3] <main>   | After [45105175] <reduction_contiguous_fast_path>   | Ratio   | Benchmark (Parameter)                                       |
+|----------|----------------------------|-----------------------------------------------------|---------|-------------------------------------------------------------|
+|          | 7.17±0.2ms                 | 7.12±0.1ms                                          | ~0.99   | bench_reduce.AddReduce.time_axis_0                          |
+|          | 6.07±0.1ms                 | 5.82±0.1ms                                          | ~0.96   | bench_reduce.AddReduce.time_axis_1                          |
+| -        | 408±10μs                   | 389±1μs                                             | 0.95    | bench_reduce.AddReduceSeparate.time_reduce(0, 'complex128') |
+|          | 186±6μs                    | 184±0.7μs                                           | ~0.99   | bench_reduce.AddReduceSeparate.time_reduce(0, 'complex64')  |
+|          | 3.50±0ms                   | 3.50±0ms                                            | ~1.00   | bench_reduce.AddReduceSeparate.time_reduce(0, 'float16')    |
+|          | 106±2μs                    | 104±3μs                                             | ~0.98   | bench_reduce.AddReduceSeparate.time_reduce(0, 'float32')    |
+| -        | 189±1μs                    | 165±0.4μs                                           | 0.87    | bench_reduce.AddReduceSeparate.time_reduce(0, 'float64')    |
+|          | 352±0.09μs                 | 352±0.2μs                                           | ~1.00   | bench_reduce.AddReduceSeparate.time_reduce(0, 'int16')      |
+| -        | 354±6μs                    | 336±0.8μs                                           | 0.95    | bench_reduce.AddReduceSeparate.time_reduce(0, 'int32')      |
+| -        | 225±1μs                    | 213±1μs                                             | 0.95    | bench_reduce.AddReduceSeparate.time_reduce(0, 'int64')      |
+|          | 450±8μs                    | 446±5μs                                             | ~0.99   | bench_reduce.AddReduceSeparate.time_reduce(1, 'complex128') |
+|          | 340±0.6μs                  | 340±0.2μs                                           | ~1.00   | bench_reduce.AddReduceSeparate.time_reduce(1, 'complex64')  |
+|          | 2.36±0ms                   | 2.36±0ms                                            | ~1.00   | bench_reduce.AddReduceSeparate.time_reduce(1, 'float16')    |
+| -        | 178±0.6μs                  | 178±0.03μs                                          | 1.00    | bench_reduce.AddReduceSeparate.time_reduce(1, 'float32')    |
+|          | 200±5μs                    | 196±5μs                                             | ~0.98   | bench_reduce.AddReduceSeparate.time_reduce(1, 'float64')    |
+|          | 291±0.4μs                  | 290±0.3μs                                           | ~1.00   | bench_reduce.AddReduceSeparate.time_reduce(1, 'int16')      |
+|          | 270±1μs                    | 269±2μs                                             | ~1.00   | bench_reduce.AddReduceSeparate.time_reduce(1, 'int32')      |
+| -        | 185±2μs                    | 175±0.9μs                                           | 0.95    | bench_reduce.AddReduceSeparate.time_reduce(1, 'int64')      |
+| -        | 781±3ns                    | 414±0.5ns                                           | 0.53    | bench_reduce.AnyAll.time_all_fast                           |
+| -        | 2.67±0.1μs                 | 2.24±0μs                                            | 0.84    | bench_reduce.AnyAll.time_all_slow                           |
+| -        | 790±1ns                    | 413±0.9ns                                           | 0.52    | bench_reduce.AnyAll.time_any_fast                           |
+| -        | 2.51±0.1μs                 | 2.14±0.1μs                                          | 0.85    | bench_reduce.AnyAll.time_any_slow                           |
+|          | 3.36±0.5μs                 | 3.25±0.5μs                                          | ~0.97   | bench_reduce.ArgMax.time_argmax(<class 'bool'>)             |
+|          | 23.3±0.2μs                 | 23.3±0.2μs                                          | ~1.00   | bench_reduce.ArgMax.time_argmax(<class 'numpy.float32'>)    |
+|          | 46.0±0.7μs                 | 46.3±1μs                                            | ~1.01   | bench_reduce.ArgMax.time_argmax(<class 'numpy.float64'>)    |
+|          | 9.02±0.4μs                 | 9.03±0.3μs                                          | ~1.00   | bench_reduce.ArgMax.time_argmax(<class 'numpy.int16'>)      |
+|          | 17.0±0.5μs                 | 17.1±0.6μs                                          | ~1.00   | bench_reduce.ArgMax.time_argmax(<class 'numpy.int32'>)      |
+|          | 44.3±0.4μs                 | 44.2±0.5μs                                          | ~1.00   | bench_reduce.ArgMax.time_argmax(<class 'numpy.int64'>)      |
+|          | 5.74±0.2μs                 | 5.47±0.2μs                                          | ~0.95   | bench_reduce.ArgMax.time_argmax(<class 'numpy.int8'>)       |
+|          | 12.8±0.3μs                 | 12.9±0.3μs                                          | ~1.00   | bench_reduce.ArgMax.time_argmax(<class 'numpy.uint16'>)     |
+|          | 24.6±0.5μs                 | 24.5±0.5μs                                          | ~1.00   | bench_reduce.ArgMax.time_argmax(<class 'numpy.uint32'>)     |
+|          | 49.4±0.7μs                 | 49.4±0.7μs                                          | ~1.00   | bench_reduce.ArgMax.time_argmax(<class 'numpy.uint64'>)     |
+|          | 7.33±0.2μs                 | 7.46±0.2μs                                          | ~1.02   | bench_reduce.ArgMax.time_argmax(<class 'numpy.uint8'>)      |
+|          | 3.19±0.03μs                | 3.22±0.01μs                                         | ~1.01   | bench_reduce.ArgMin.time_argmin(<class 'bool'>)             |
+|          | 23.5±0.3μs                 | 23.5±0.2μs                                          | ~1.00   | bench_reduce.ArgMin.time_argmin(<class 'numpy.float32'>)    |
+|          | 46.6±0.6μs                 | 46.7±2μs                                            | ~1.00   | bench_reduce.ArgMin.time_argmin(<class 'numpy.float64'>)    |
+|          | 9.16±0.3μs                 | 9.03±0.3μs                                          | ~0.99   | bench_reduce.ArgMin.time_argmin(<class 'numpy.int16'>)      |
+|          | 17.3±0.5μs                 | 17.3±0.6μs                                          | ~1.00   | bench_reduce.ArgMin.time_argmin(<class 'numpy.int32'>)      |
+|          | 42.5±0.6μs                 | 42.6±0.8μs                                          | ~1.00   | bench_reduce.ArgMin.time_argmin(<class 'numpy.int64'>)      |
+|          | 5.52±0.2μs                 | 5.38±0.2μs                                          | ~0.98   | bench_reduce.ArgMin.time_argmin(<class 'numpy.int8'>)       |
+|          | 14.0±0.8μs                 | 12.8±0.3μs                                          | ~0.92   | bench_reduce.ArgMin.time_argmin(<class 'numpy.uint16'>)     |
+|          | 24.9±0.6μs                 | 24.8±0.6μs                                          | ~1.00   | bench_reduce.ArgMin.time_argmin(<class 'numpy.uint32'>)     |
+|          | 50.0±1μs                   | 50.0±1μs                                            | ~1.00   | bench_reduce.ArgMin.time_argmin(<class 'numpy.uint64'>)     |
+|          | 7.77±0.5μs                 | 7.51±0.2μs                                          | ~0.97   | bench_reduce.ArgMin.time_argmin(<class 'numpy.uint8'>)      |
+|          | 2.25±0.01μs                | 2.23±0.01μs                                         | ~0.99   | bench_reduce.FMinMax.time_max(<class 'numpy.float32'>)      |
+|          | 3.48±0.02μs                | 3.48±0.02μs                                         | ~1.00   | bench_reduce.FMinMax.time_max(<class 'numpy.float64'>)      |
+|          | 2.22±0.01μs                | 2.22±0.01μs                                         | ~1.00   | bench_reduce.FMinMax.time_min(<class 'numpy.float32'>)      |
+|          | 3.50±0.02μs                | 3.68±0.2μs                                          | ~1.05   | bench_reduce.FMinMax.time_min(<class 'numpy.float64'>)      |
+| -        | 1.40±0μs                   | 1.03±0.02μs                                         | 0.73    | bench_reduce.SmallReduction.time_any(100)                   |
+| -        | 1.40±0.01μs                | 1.02±0.02μs                                         | 0.73    | bench_reduce.SmallReduction.time_any(4)                     |
+| +        | 1.56±0.01μs                | 1.60±0.01μs                                         | 1.02    | bench_reduce.SmallReduction.time_max(100)                   |
+|          | 1.56±0.01μs                | 1.60±0.01μs                                         | ~1.02   | bench_reduce.SmallReduction.time_max(4)                     |
+| -        | 1.54±0.01μs                | 1.19±0.02μs                                         | 0.77    | bench_reduce.SmallReduction.time_sum(100)                   |
+| -        | 1.56±0μs                   | 1.20±0.01μs                                         | 0.77    | bench_reduce.SmallReduction.time_sum(4)                     |
+|          | 1.60±0.01μs                | 1.60±0.02μs                                         | ~1.00   | bench_reduce.SmallReduction2D.time_sum_axis_1               |
+|          | 1.55±0.02μs                | 1.57±0.04μs                                         | ~1.01   | bench_reduce.StatsReductions.time_max('bool_')              |
+| +        | 2.12±0.01μs                | 2.17±0.02μs                                         | 1.02    | bench_reduce.StatsReductions.time_max('complex64')          |
+|          | 1.57±0.01μs                | 1.59±0.03μs                                         | ~1.02   | bench_reduce.StatsReductions.time_max('float32')            |
+|          | 1.58±0.01μs                | 1.61±0.04μs                                         | ~1.01   | bench_reduce.StatsReductions.time_max('float64')            |
+|          | 1.59±0.02μs                | 1.64±0.02μs                                         | ~1.04   | bench_reduce.StatsReductions.time_max('int64')              |
+| +        | 1.59±0.01μs                | 1.63±0.02μs                                         | 1.03    | bench_reduce.StatsReductions.time_max('uint64')             |
+| +        | 2.47±0.01μs                | 2.57±0.06μs                                         | 1.04    | bench_reduce.StatsReductions.time_mean('bool_')             |
+| -        | 3.70±0.02μs                | 3.38±0.04μs                                         | 0.91    | bench_reduce.StatsReductions.time_mean('complex64')         |
+| -        | 3.68±0.02μs                | 3.29±0.04μs                                         | 0.89    | bench_reduce.StatsReductions.time_mean('float32')           |
+| -        | 2.21±0.01μs                | 1.88±0.02μs                                         | 0.85    | bench_reduce.StatsReductions.time_mean('float64')           |
+|          | 2.53±0.02μs                | 2.57±0.06μs                                         | ~1.01   | bench_reduce.StatsReductions.time_mean('int64')             |
+| +        | 2.56±0.02μs                | 2.65±0.04μs                                         | 1.03    | bench_reduce.StatsReductions.time_mean('uint64')            |
+|          | 1.55±0.01μs                | 1.56±0.03μs                                         | ~1.01   | bench_reduce.StatsReductions.time_min('bool_')              |
+|          | 2.12±0.01μs                | 2.17±0.03μs                                         | ~1.02   | bench_reduce.StatsReductions.time_min('complex64')          |
+| +        | 1.58±0.01μs                | 1.60±0.03μs                                         | 1.02    | bench_reduce.StatsReductions.time_min('float32')            |
+| +        | 1.57±0.01μs                | 1.61±0.01μs                                         | 1.02    | bench_reduce.StatsReductions.time_min('float64')            |
+|          | 1.57±0.01μs                | 1.61±0.04μs                                         | ~1.03   | bench_reduce.StatsReductions.time_min('int64')              |
+|          | 1.58±0.01μs                | 1.60±0.03μs                                         | ~1.01   | bench_reduce.StatsReductions.time_min('uint64')             |
+| +        | 1.77±0.01μs                | 1.79±0.01μs                                         | 1.01    | bench_reduce.StatsReductions.time_prod('bool_')             |
+| -        | 2.44±0μs                   | 2.10±0.02μs                                         | 0.86    | bench_reduce.StatsReductions.time_prod('complex64')         |
+| -        | 1.68±0μs                   | 1.35±0.02μs                                         | 0.80    | bench_reduce.StatsReductions.time_prod('float32')           |
+| -        | 1.67±0.02μs                | 1.35±0.02μs                                         | 0.81    | bench_reduce.StatsReductions.time_prod('float64')           |
+| -        | 1.59±0.01μs                | 1.25±0.02μs                                         | 0.78    | bench_reduce.StatsReductions.time_prod('int64')             |
+| -        | 1.63±0μs                   | 1.25±0.02μs                                         | 0.77    | bench_reduce.StatsReductions.time_prod('uint64')            |
+| -        | 8.04±0.04μs                | 7.70±0.07μs                                         | 0.96    | bench_reduce.StatsReductions.time_std('bool_')              |
+|          | 10.4±0.01μs                | 10.4±0.1μs                                          | ~1.00   | bench_reduce.StatsReductions.time_std('complex64')          |
+| -        | 8.61±0.03μs                | 8.31±0.06μs                                         | 0.96    | bench_reduce.StatsReductions.time_std('float32')            |
+| -        | 6.81±0.01μs                | 6.50±0.05μs                                         | 0.95    | bench_reduce.StatsReductions.time_std('float64')            |
+| -        | 7.56±0μs                   | 7.23±0.05μs                                         | 0.96    | bench_reduce.StatsReductions.time_std('int64')              |
+| -        | 7.68±0.02μs                | 7.32±0.1μs                                          | 0.95    | bench_reduce.StatsReductions.time_std('uint64')             |
+| -        | 7.61±0.01μs                | 7.36±0.08μs                                         | 0.97    | bench_reduce.StatsReductions.time_var('bool_')              |
+|          | 9.85±0.01μs                | 9.91±0.1μs                                          | ~1.01   | bench_reduce.StatsReductions.time_var('complex64')          |
+| -        | 8.09±0.01μs                | 7.77±0.09μs                                         | 0.96    | bench_reduce.StatsReductions.time_var('float32')            |
+| -        | 6.43±0.03μs                | 6.22±0.04μs                                         | 0.97    | bench_reduce.StatsReductions.time_var('float64')            |
+| -        | 7.19±0.03μs                | 6.90±0.05μs                                         | 0.96    | bench_reduce.StatsReductions.time_var('int64')              |
+| -        | 7.23±0.03μs                | 7.02±0.05μs                                         | 0.97    | bench_reduce.StatsReductions.time_var('uint64')             |

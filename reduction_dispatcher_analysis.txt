@@ -1,0 +1,95 @@
+This dispatching for numpy reductions like `np.sum` results in quite some overhead. The reason is: every call to a NumPy function decorated with `@array_function_dispatch(_xyz_dispatcher)` invokes a Python "dispatcher" function just to declare which arguments are relevant for `__array_function__` dispatch. The C dispatcher then unpacks the returned tuple, walks it to find any object implementing `__array_function__`, and only then calls the actual implementation. 
+
+Reduction of the overhead can be done by
+
+1. Introducing a different specification of the arguments to handle (avoiding the Python function call)
+2. Add a fast path for when all arguments are safe and skip a call to `get_implementing_args_and_methods`.
+
+Doing only the second option is possible (it gives most of the performance improvements and is a much smaller change), but there are some potential
+backwards compatibility issues with custom dispatchers. Maybe this is not a worry as the dispatch mechanism (`numpy._core.overrides.array_function_dispatch`) is not in the public API.
+(single commit with this approach: https://github.com/numpy/numpy/commit/cdba07377d758ccfaf75416be621e841b027f3b8)
+
+Benchmark results:
+
+| Benchmark                 | main    | branch                 |
+|---------------------------|---------|------------------------|
+| np.sum(array_4)           | 1.47 us | 1.39 us: 1.06x faster  |
+| np.sum(array_20)          | 1.47 us | 1.39 us: 1.06x faster  |
+| np.prod(array_20)         | 1.44 us | 1.37 us: 1.05x faster  |
+| np.max(array_20)          | 1.50 us | 1.43 us: 1.05x faster  |
+| np.sum(int_20)            | 1.48 us | 1.40 us: 1.06x faster  |
+| np.sum(10x10)             | 1.52 us | 1.43 us: 1.06x faster  |
+| np.sum(10x10,axis=0)      | 1.68 us | 1.59 us: 1.06x faster  |
+| np.sum(10x10,axis=1)      | 1.64 us | 1.55 us: 1.06x faster  |
+| np.any(bool_20)           | 1.34 us | 1.25 us: 1.07x faster  |
+| np.sum(2x2_float)         | 1.51 us | 1.43 us: 1.06x faster  |
+| np.sum(2x2_int)           | 1.51 us | 1.43 us: 1.06x faster  |
+| np.sum(array_subclass_20) | 1.90 us | 1.79 us: 1.06x faster  |
+| np.sin(array_20)          |  399 ns |  380 ns: 1.05x faster  |
+| **Geometric mean**        | (ref)   | **1.06x faster**       |
+
+`np.sin` is a ufunc and does not go through `__array_function__` at all -- the ~5% it shows is most likely a binary-layout / cache-locality artifact from rebuilding rather than a real signal. Subtracting that ~5% baseline shift, the real speedup on reductions is ~1-2%, with `np.any(bool_20)` (the fastest underlying reduction, so dispatch overhead is relatively largest) showing the biggest win.
+
+The performance gain is ~6% on the reductions tested (before correcting for a ~5% baseline shift on the unrelated `np.sin` benchmark, so real effect ~1-2%). In this PR 17 dispatchers are converted, but we can convert about 188 more (mechanical conversion, for a followup PR). The remaining 33 dispatchers need special casing, or can stay as Python callables.
+In combinations with other performance improvements (see #31098) the gain here could be more significant.
+
+
+<details><summary>Script</summary>
+
+```python
+"""Benchmark script for reduction performance improvements.
+
+Measures performance of reductions (sum, prod, max, min, any) for:
+- Small 1D arrays (size 4, 20)
+- Int array (size 20)
+- 2D array (10x10, full reduction and axis reduction)
+- Array subclass (size 20) to exercise the __array_function__ dispatch path
+- Comparison with non-reduction ufunc (sin) as a baseline
+"""
+import pyperf
+import numpy as np
+
+
+class _Sub(np.ndarray):
+    """Trivial ndarray subclass to trigger the __array_function__ path."""
+
+
+runner = pyperf.Runner()
+
+# 1D float reductions
+a4 = np.ones(4)
+a20 = np.ones(20)
+runner.bench_func('np.sum(array_4)', np.sum, a4)
+runner.bench_func('np.sum(array_20)', np.sum, a20)
+runner.bench_func('np.prod(array_20)', np.prod, a20)
+runner.bench_func('np.max(array_20)', np.max, a20)
+
+# 1D int reduction
+a_int = np.ones(20, dtype=np.int64)
+runner.bench_func('np.sum(int_20)', np.sum, a_int)
+
+# 2D reductions
+a2d = np.ones((10, 10))
+runner.bench_func('np.sum(10x10)', np.sum, a2d)
+runner.bench_func('np.sum(10x10,axis=0)', np.sum, a2d, 0)
+runner.bench_func('np.sum(10x10,axis=1)', np.sum, a2d, 1)
+
+# Boolean reduction
+a_bool = np.ones(20, dtype=bool)
+runner.bench_func('np.any(bool_20)', np.any, a_bool)
+
+# Small 2D reductions (full)
+a2x2 = np.ones((2, 2))
+a2x2_int = np.ones((2, 2), dtype=np.int64)
+runner.bench_func('np.sum(2x2_float)', np.sum, a2x2)
+runner.bench_func('np.sum(2x2_int)', np.sum, a2x2_int)
+
+# Subclass: exercises the __array_function__ dispatch path
+a_sub = np.ones(20).view(_Sub)
+runner.bench_func('np.sum(array_subclass_20)', np.sum, a_sub)
+
+# Reference: unary ufunc (not a reduction, does not go through
+# __array_function__ -- performance should be unchanged by this PR)
+runner.bench_func('np.sin(array_20)', np.sin, a20)
+```
+</details>
