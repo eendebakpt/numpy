@@ -2077,11 +2077,41 @@ NpyDatetime_ConvertPyDateTimeToDatetimeStruct(
 {
     PyObject *tmp;
     int isleap;
+    int has_time;
 
     /* Initialize the output to all zeros */
     memset(out, 0, sizeof(npy_datetimestruct));
     out->month = 1;
     out->day = 1;
+
+    /*
+     * Fast path for genuine datetime.date / datetime.datetime objects
+     * (including subclasses such as pandas Timestamp).  Read the fields
+     * straight from the C struct via the datetime C-API macros instead of
+     * doing ~14 string-keyed attribute lookups plus temporary int objects.
+     * PyDate_Check is also true for datetime.datetime, so the time fields
+     * are read in the nested PyDateTime_Check branch.  Both this and the
+     * duck-typed fallback below converge on the shared validation tail.
+     */
+    if (PyDate_Check(obj)) {
+        out->year = PyDateTime_GET_YEAR(obj);
+        out->month = PyDateTime_GET_MONTH(obj);
+        out->day = PyDateTime_GET_DAY(obj);
+
+        has_time = PyDateTime_Check(obj);
+        if (has_time) {
+            out->hour = PyDateTime_DATE_GET_HOUR(obj);
+            out->min = PyDateTime_DATE_GET_MINUTE(obj);
+            out->sec = PyDateTime_DATE_GET_SECOND(obj);
+            out->us = PyDateTime_DATE_GET_MICROSECOND(obj);
+        }
+        goto validate_and_return;
+    }
+
+    /*
+     * Generic duck-typed fallback for objects that expose date/datetime
+     * attributes without being a datetime.date instance.
+     */
 
     /* Need at least year/month/day attributes */
     if (!PyObject_HasAttrString(obj, "year") ||
@@ -2126,6 +2156,65 @@ NpyDatetime_ConvertPyDateTimeToDatetimeStruct(
     }
     Py_DECREF(tmp);
 
+    /*
+     * The object is treated as a date unless it exposes all four time
+     * attributes, in which case the time fields are read as well.
+     */
+    has_time = PyObject_HasAttrString(obj, "hour") &&
+            PyObject_HasAttrString(obj, "minute") &&
+            PyObject_HasAttrString(obj, "second") &&
+            PyObject_HasAttrString(obj, "microsecond");
+    if (has_time) {
+        /* Get the hour */
+        tmp = PyObject_GetAttrString(obj, "hour");
+        if (tmp == NULL) {
+            return -1;
+        }
+        out->hour = PyLong_AsLong(tmp);
+        if (error_converting(out->hour)) {
+            Py_DECREF(tmp);
+            return -1;
+        }
+        Py_DECREF(tmp);
+
+        /* Get the minute */
+        tmp = PyObject_GetAttrString(obj, "minute");
+        if (tmp == NULL) {
+            return -1;
+        }
+        out->min = PyLong_AsLong(tmp);
+        if (error_converting(out->min)) {
+            Py_DECREF(tmp);
+            return -1;
+        }
+        Py_DECREF(tmp);
+
+        /* Get the second */
+        tmp = PyObject_GetAttrString(obj, "second");
+        if (tmp == NULL) {
+            return -1;
+        }
+        out->sec = PyLong_AsLong(tmp);
+        if (error_converting(out->sec)) {
+            Py_DECREF(tmp);
+            return -1;
+        }
+        Py_DECREF(tmp);
+
+        /* Get the microsecond */
+        tmp = PyObject_GetAttrString(obj, "microsecond");
+        if (tmp == NULL) {
+            return -1;
+        }
+        out->us = PyLong_AsLong(tmp);
+        if (error_converting(out->us)) {
+            Py_DECREF(tmp);
+            return -1;
+        }
+        Py_DECREF(tmp);
+    }
+
+validate_and_return:
     /* Validate that the month and day are valid for the year */
     if (out->month < 1 || out->month > 12) {
         goto invalid_date;
@@ -2136,66 +2225,15 @@ NpyDatetime_ConvertPyDateTimeToDatetimeStruct(
         goto invalid_date;
     }
 
-    /* Check for time attributes (if not there, return success as a date) */
-    if (!PyObject_HasAttrString(obj, "hour") ||
-            !PyObject_HasAttrString(obj, "minute") ||
-            !PyObject_HasAttrString(obj, "second") ||
-            !PyObject_HasAttrString(obj, "microsecond")) {
-        /* The best unit for date is 'D' */
+    /* A date without a time resolves to the 'D' unit */
+    if (!has_time) {
         if (out_bestunit != NULL) {
             *out_bestunit = NPY_FR_D;
         }
         return 0;
     }
 
-    /* Get the hour */
-    tmp = PyObject_GetAttrString(obj, "hour");
-    if (tmp == NULL) {
-        return -1;
-    }
-    out->hour = PyLong_AsLong(tmp);
-    if (error_converting(out->hour)) {
-        Py_DECREF(tmp);
-        return -1;
-    }
-    Py_DECREF(tmp);
-
-    /* Get the minute */
-    tmp = PyObject_GetAttrString(obj, "minute");
-    if (tmp == NULL) {
-        return -1;
-    }
-    out->min = PyLong_AsLong(tmp);
-    if (error_converting(out->min)) {
-        Py_DECREF(tmp);
-        return -1;
-    }
-    Py_DECREF(tmp);
-
-    /* Get the second */
-    tmp = PyObject_GetAttrString(obj, "second");
-    if (tmp == NULL) {
-        return -1;
-    }
-    out->sec = PyLong_AsLong(tmp);
-    if (error_converting(out->sec)) {
-        Py_DECREF(tmp);
-        return -1;
-    }
-    Py_DECREF(tmp);
-
-    /* Get the microsecond */
-    tmp = PyObject_GetAttrString(obj, "microsecond");
-    if (tmp == NULL) {
-        return -1;
-    }
-    out->us = PyLong_AsLong(tmp);
-    if (error_converting(out->us)) {
-        Py_DECREF(tmp);
-        return -1;
-    }
-    Py_DECREF(tmp);
-
+    /* Validate the time */
     if (out->hour < 0 || out->hour >= 24 ||
             out->min < 0 || out->min >= 60 ||
             out->sec < 0 || out->sec >= 60 ||
