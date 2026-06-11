@@ -16,6 +16,11 @@ __all__ = ['matrix_power', 'solve', 'tensorsolve', 'tensorinv', 'inv',
            'cross', 'outer', 'tensordot', 'matmul', 'matrix_transpose',
            'matrix_norm', 'vector_norm', 'vecdot']
 
+# PEP 810: deferred on Python 3.15+, ignored on older Python.
+# Defers numpy.lib._twodim_base_impl (and its transitive numpy.matrixlib
+# pull-in via _index_tricks_impl) until eye/triu are actually used.
+__lazy_modules__ = ["numpy.lib._twodim_base_impl"]
+
 import functools
 import operator
 from typing import Any, NamedTuple

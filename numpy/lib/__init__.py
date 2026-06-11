@@ -8,36 +8,48 @@ other public modules and are useful to have in the main name-space.
 
 """
 
+# PEP 810: deferred on Python 3.15+, ignored on older Python.
+__lazy_modules__ = [
+    "numpy.lib._arraypad_impl",
+    "numpy.lib._arraysetops_impl",
+    "numpy.lib._function_base_impl",
+    "numpy.lib._histograms_impl",
+    "numpy.lib._index_tricks_impl",
+    "numpy.lib._nanfunctions_impl",
+    "numpy.lib._npyio_impl",
+    "numpy.lib._polynomial_impl",
+    "numpy.lib._shape_base_impl",
+    "numpy.lib._stride_tricks_impl",
+    "numpy.lib._twodim_base_impl",
+    "numpy.lib._type_check_impl",
+    "numpy.lib._ufunclike_impl",
+    "numpy.lib._utils_impl",
+    "numpy.lib.scimath",
+]
+
 # Public submodules
 # Note: recfunctions is public, but not imported
 from numpy._core._multiarray_umath import add_docstring, tracemalloc_domain
 from numpy._core.function_base import add_newdoc
 
-# Private submodules
-# load module names. See https://github.com/networkx/networkx/issues/5838
+# Private submodules.  Originally this block did
+# ``from . import (_arraypad_impl, _arraysetops_impl, ...)`` to register the
+# submodule names (see https://github.com/networkx/networkx/issues/5838).
+# That form is *not* affected by PEP 810's ``__lazy_modules__``: ``from . import
+# submodule`` always loads the submodule eagerly even when the name is listed
+# in ``__lazy_modules__``.  We split it so the lazy modules can actually defer:
+#   * the modules in ``__lazy_modules__`` above are accessed on demand via
+#     Python's normal attribute lookup (and the explicit ``lazy from . import``
+#     statements further down for Python 3.15+);
+#   * the always-eager modules below stay eager.
 from . import (
-    _arraypad_impl,
-    _arraysetops_impl,
     _arrayterator_impl,
-    _function_base_impl,
-    _histograms_impl,
-    _index_tricks_impl,
-    _nanfunctions_impl,
-    _npyio_impl,
-    _polynomial_impl,
-    _shape_base_impl,
-    _stride_tricks_impl,
-    _twodim_base_impl,
-    _type_check_impl,
-    _ufunclike_impl,
-    _utils_impl,
     _version,
     array_utils,
     format,
     introspect,
     mixins,
     npyio,
-    scimath,
     stride_tricks,
 )
 

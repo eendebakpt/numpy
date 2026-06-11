@@ -6,6 +6,13 @@ are available in the main ``numpy`` namespace - use that instead.
 
 """
 
+# PEP 810: deferred on Python 3.15+, ignored on older Python.
+__lazy_modules__ = [
+    "numpy._core.einsumfunc",
+    "numpy._core.memmap",
+    "numpy._core.records",
+]
+
 import os
 
 from numpy.version import version as __version__
@@ -108,14 +115,15 @@ from . import numerictypes as nt
 from .numerictypes import sctypeDict, sctypes
 
 multiarray.set_typeDict(nt.sctypeDict)
+
 from . import einsumfunc, fromnumeric, function_base, getlimits, numeric, shape_base
-from .einsumfunc import *
+from .einsumfunc import einsum, einsum_path
 from .fromnumeric import *
 from .function_base import *
 from .getlimits import *
 
 # Note: module name memmap is overwritten by a class with same name
-from .memmap import *
+from .memmap import memmap
 from .numeric import *
 from .records import recarray, record
 from .shape_base import *
@@ -152,13 +160,15 @@ pow = numeric.power
 __all__ = [
     "abs", "acos", "acosh", "asin", "asinh", "atan", "atanh", "atan2",
     "bitwise_invert", "bitwise_left_shift", "bitwise_right_shift", "concat",
-    "pow", "permute_dims", "memmap", "sctypeDict", "record", "recarray"
+    "pow", "permute_dims", "memmap", "sctypeDict", "record", "recarray",
+    # einsumfunc.__all__ -- hardcoded so we do not force the lazy
+    # `numpy._core.einsumfunc` module to load just to read its `__all__`.
+    "einsum", "einsum_path",
 ]
 __all__ += numeric.__all__
 __all__ += function_base.__all__
 __all__ += getlimits.__all__
 __all__ += shape_base.__all__
-__all__ += einsumfunc.__all__
 
 
 def _ufunc_reduce(func):

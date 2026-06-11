@@ -86,6 +86,28 @@ import os
 import sys
 import warnings
 
+# PEP 810: deferred on Python 3.15+, ignored on older Python.
+__lazy_modules__ = [
+    "numpy.lib",
+    "numpy.matrixlib",
+    "numpy.lib.scimath",
+    "numpy.lib._arraypad_impl",
+    "numpy.lib._arraysetops_impl",
+    "numpy.lib._function_base_impl",
+    "numpy.lib._histograms_impl",
+    "numpy.lib._index_tricks_impl",
+    "numpy.lib._nanfunctions_impl",
+    "numpy.lib._npyio_impl",
+    "numpy.lib._polynomial_impl",
+    "numpy.lib._shape_base_impl",
+    "numpy.lib._stride_tricks_impl",
+    "numpy.lib._twodim_base_impl",
+    "numpy.lib._type_check_impl",
+    "numpy.lib._ufunclike_impl",
+    "numpy.lib._utils_impl",
+    "numpy._array_api_info",
+]
+
 # If a version with git hash was stored, use that instead
 from . import version
 from ._expired_attrs_2_0 import __expired_attributes__
@@ -671,25 +693,73 @@ else:
 
     from ._array_api_info import __array_namespace_info__
 
-    __all__ = list(
-        __numpy_submodules__ |
-        set(_core.__all__) |
-        set(_mat.__all__) |
-        set(lib._histograms_impl.__all__) |
-        set(lib._nanfunctions_impl.__all__) |
-        set(lib._function_base_impl.__all__) |
-        set(lib._twodim_base_impl.__all__) |
-        set(lib._shape_base_impl.__all__) |
-        set(lib._type_check_impl.__all__) |
-        set(lib._arraysetops_impl.__all__) |
-        set(lib._ufunclike_impl.__all__) |
-        set(lib._arraypad_impl.__all__) |
-        set(lib._utils_impl.__all__) |
-        set(lib._stride_tricks_impl.__all__) |
-        set(lib._polynomial_impl.__all__) |
-        set(lib._npyio_impl.__all__) |
-        set(lib._index_tricks_impl.__all__) |
-        {"emath", "show_config", "__version__", "__array_namespace_info__"}
+    # `__all__` is computed by reading each `lib._*_impl.__all__`, which
+    # would force every lazy module to load and defeat `__lazy_modules__`.
+    # The lazy-module names are kept on a separate hardcoded set; the
+    # eager core names still come from `_core.__all__` and `_mat.__all__`
+    # (matrixlib is already loaded above as `_mat`).
+    _lazy_public_names = frozenset({
+        # lib._arraypad_impl
+        "pad",
+        # lib._arraysetops_impl
+        "ediff1d", "intersect1d", "isin", "setdiff1d", "setxor1d",
+        "union1d", "unique", "unique_all", "unique_counts",
+        "unique_inverse", "unique_values",
+        # lib._function_base_impl
+        "angle", "append", "asarray_chkfinite", "average", "bartlett",
+        "bincount", "blackman", "copy", "corrcoef", "cov", "delete",
+        "diff", "digitize", "extract", "flip", "gradient", "hamming",
+        "hanning", "i0", "insert", "interp", "iterable", "kaiser",
+        "median", "meshgrid", "percentile", "piecewise", "place",
+        "quantile", "rot90", "select", "sinc", "sort_complex",
+        "trapezoid", "trim_zeros", "unwrap", "vectorize",
+        # lib._histograms_impl
+        "histogram", "histogram_bin_edges", "histogramdd",
+        # lib._index_tricks_impl
+        "c_", "diag_indices", "diag_indices_from", "fill_diagonal",
+        "index_exp", "ix_", "mgrid", "ndenumerate", "ndindex", "ogrid",
+        "r_", "ravel_multi_index", "s_", "unravel_index",
+        # lib._nanfunctions_impl
+        "nanargmax", "nanargmin", "nancumprod", "nancumsum", "nanmax",
+        "nanmean", "nanmedian", "nanmin", "nanpercentile", "nanprod",
+        "nanquantile", "nanstd", "nansum", "nanvar",
+        # lib._npyio_impl
+        "fromregex", "genfromtxt", "load", "loadtxt", "packbits", "save",
+        "savetxt", "savez", "savez_compressed", "unpackbits",
+        # lib._polynomial_impl
+        "poly", "poly1d", "polyadd", "polyder", "polydiv", "polyfit",
+        "polyint", "polymul", "polysub", "polyval", "roots",
+        # lib._shape_base_impl
+        "apply_along_axis", "apply_over_axes", "array_split",
+        "column_stack", "dsplit", "dstack", "expand_dims", "hsplit",
+        "kron", "put_along_axis", "split", "take_along_axis", "tile",
+        "vsplit",
+        # lib._stride_tricks_impl
+        "broadcast_arrays", "broadcast_shapes", "broadcast_to",
+        # lib._twodim_base_impl
+        "diag", "diagflat", "eye", "fliplr", "flipud", "histogram2d",
+        "mask_indices", "tri", "tril", "tril_indices",
+        "tril_indices_from", "triu", "triu_indices",
+        "triu_indices_from", "vander",
+        # lib._type_check_impl
+        "common_type", "imag", "iscomplex", "iscomplexobj", "isreal",
+        "isrealobj", "mintypecode", "nan_to_num", "real", "real_if_close",
+        "typename",
+        # lib._ufunclike_impl
+        "fix", "isneginf", "isposinf",
+        # lib._utils_impl
+        "get_include", "info", "show_runtime",
+        # matrixlib
+        "asmatrix", "bmat", "matrix",
+    })
+
+    from ._array_api_info import __array_namespace_info__
+
+    __all__ = sorted(
+        __numpy_submodules__
+        | set(_core.__all__)
+        | _lazy_public_names
+        | {"emath", "show_config", "__version__", "__array_namespace_info__"}
     )
 
     # Filter out Cython harmless warnings
