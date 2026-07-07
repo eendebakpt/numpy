@@ -40,17 +40,20 @@ class TestGetImplementingArgs:
     def test_ndarray(self):
         array = np.array(1)
 
+        # When every arg is exact ndarray or a basic Python type, no
+        # override is possible; the collected list is empty and the caller
+        # short-circuits to the default implementation.
         args = _get_implementing_args([array])
-        assert_equal(list(args), [array])
+        assert_equal(list(args), [])
 
         args = _get_implementing_args([array, array])
-        assert_equal(list(args), [array])
+        assert_equal(list(args), [])
 
         args = _get_implementing_args([array, 1])
-        assert_equal(list(args), [array])
+        assert_equal(list(args), [])
 
         args = _get_implementing_args([1, array])
-        assert_equal(list(args), [array])
+        assert_equal(list(args), [])
 
     def test_ndarray_subclasses(self):
 

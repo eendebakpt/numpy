@@ -62,6 +62,31 @@ get_implementing_args_and_methods(
 {
     int num_implementing_args = 0;
 
+    /* All-or-nothing fast path: if every arg is either an exact ndarray or
+     * a basic Python type that never has `__array_function__` (int, float,
+     * bool, None, slice, ...), no override is possible.  Return 0 so the
+     * caller sees `any_overrides == 0` and dispatches to `default_impl`
+     * directly, skipping per-arg dedup, method lookup, insert, and refcount
+     * work.  Mixed cases (any subclass or duck-array) fall through to the
+     * full collection loop, keeping ndarray in the fallback chain.
+     *
+     * On this branch, tuple-spec dispatchers short-circuit even earlier via
+     * `is_safe_arg` in `dispatcher_vectorcall`; this pre-scan mainly helps
+     * the legacy callable-dispatcher form. */
+    {
+        int all_safe = 1;
+        for (Py_ssize_t i = 0; i < length; i++) {
+            PyTypeObject *tp = Py_TYPE(items[i]);
+            if (tp != &PyArray_Type && !_is_basic_python_type(tp)) {
+                all_safe = 0;
+                break;
+            }
+        }
+        if (all_safe) {
+            return 0;
+        }
+    }
+
     for (Py_ssize_t i = 0; i < length; i++) {
         int new_class = 1;
         PyObject *argument = items[i];
