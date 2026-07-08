@@ -55,6 +55,19 @@ pyobject_array_insert(PyObject **array, int length, int index, PyObject *item)
  * `items` is a C array of `length` borrowed references.
  * Returns the number of arguments, or -1 on failure.
  */
+/*
+ * An exact ``ndarray`` or any basic Python builtin type (see
+ * ``_is_basic_python_type``) cannot carry an override, so the override
+ * machinery can be skipped entirely when every relevant arg is safe.
+ */
+static inline int
+is_safe_arg(PyObject *a)
+{
+    PyTypeObject *tp = Py_TYPE(a);
+    return tp == &PyArray_Type || _is_basic_python_type(tp);
+}
+
+
 static int
 get_implementing_args_and_methods(
         PyObject **items, Py_ssize_t length,
@@ -63,12 +76,12 @@ get_implementing_args_and_methods(
     int num_implementing_args = 0;
 
     /* All-or-nothing fast path: if every arg is either an exact ndarray or
-     * a basic Python type that never has `__array_function__` (int, float,
-     * bool, None, slice, ...), no override is possible.  Return 0 so the
-     * caller sees `any_overrides == 0` and dispatches to `default_impl`
-     * directly, skipping per-arg dedup, method lookup, insert, and refcount
-     * work.  Mixed cases (any subclass or duck-array) fall through to the
-     * full collection loop, keeping ndarray in the fallback chain.
+     * a basic Python type that never has `__array_function__`, no override
+     * is possible.  Return 0 so the caller sees `any_overrides == 0` and
+     * dispatches to `default_impl` directly, skipping per-arg dedup, method
+     * lookup, insert, and refcount work.  Mixed cases (any subclass or
+     * duck-array) fall through to the full collection loop, keeping ndarray
+     * in the fallback chain.
      *
      * On this branch, tuple-spec dispatchers short-circuit even earlier via
      * `is_safe_arg` in `dispatcher_vectorcall`; this pre-scan mainly helps
@@ -76,8 +89,7 @@ get_implementing_args_and_methods(
     {
         int all_safe = 1;
         for (Py_ssize_t i = 0; i < length; i++) {
-            PyTypeObject *tp = Py_TYPE(items[i]);
-            if (tp != &PyArray_Type && !_is_basic_python_type(tp)) {
+            if (!is_safe_arg(items[i])) {
                 all_safe = 0;
                 break;
             }
@@ -466,7 +478,9 @@ dispatcher_dealloc(PyArray_ArrayFunctionDispatcherObject *self)
         }
         PyMem_Free(self->relevant_arg_names);
     }
-    PyMem_Free(self->relevant_arg_positions);
+    if (self->relevant_arg_positions != NULL) {
+        PyMem_Free(self->relevant_arg_positions);
+    }
     PyObject_FREE(self);
 }
 
@@ -475,6 +489,11 @@ static void
 fix_name_if_typeerror(PyArray_ArrayFunctionDispatcherObject *self)
 {
     if (!PyErr_ExceptionMatches(PyExc_TypeError)) {
+        return;
+    }
+    /* Nothing to rewrite for tuple-spec dispatchers (they never invoke a
+     * separate dispatcher function whose name would leak into the error). */
+    if (self->dispatcher_name == NULL) {
         return;
     }
 
@@ -534,19 +553,6 @@ fix_name_if_typeerror(PyArray_ArrayFunctionDispatcherObject *self)
 /*
  * Return 1 if `a` is guaranteed not to implement ``__array_function__``.
  *
- * An exact ``ndarray`` or any basic Python builtin type (see
- * ``_is_basic_python_type``) cannot carry an override, so the override
- * machinery can be skipped entirely when every relevant arg is safe.
- */
-static inline int
-is_safe_arg(PyObject *a)
-{
-    PyTypeObject *tp = Py_TYPE(a);
-    return tp == &PyArray_Type || _is_basic_python_type(tp);
-}
-
-
-/*
  * For a tuple-spec dispatcher, extract the value of the i-th relevant arg
  * from positional/keyword arguments.  Returns Py_None if the arg is missing
  * (so downstream checks can short-circuit on None).
@@ -565,9 +571,17 @@ lookup_relevant_arg(
         PyObject *name = self->relevant_arg_names[i];
         for (Py_ssize_t k = 0; k < nkwargs; k++) {
             PyObject *kw = PyTuple_GET_ITEM(kwnames, k);
-            /* Interned string pointer compare first, then full cmp. */
-            if (kw == name || PyUnicode_Compare(kw, name) == 0) {
+            /* Interned string pointer compare first, then full cmp.
+             * PyUnicode_Compare returns -1 on error too; check exception. */
+            if (kw == name) {
                 return args[nargs + k];
+            }
+            int cmp = PyUnicode_Compare(kw, name);
+            if (cmp == 0) {
+                return args[nargs + k];
+            }
+            if (cmp == -1 && PyErr_Occurred()) {
+                PyErr_Clear();
             }
         }
     }
@@ -777,24 +791,30 @@ dispatcher_new(PyTypeObject *NPY_UNUSED(cls), PyObject *args, PyObject *kwargs)
         return PyErr_NoMemory();
     }
 
-    PyObject *relevant_arg_spec;
-    char *kwlist[] = {"", "", NULL};
-    if (!PyArg_ParseTupleAndKeywords(
-            args, kwargs, "OO:_ArrayFunctionDispatcher", kwlist,
-            &relevant_arg_spec, &self->default_impl)) {
-        Py_DECREF(self);
-        return NULL;
-    }
-
+    /* Initialize all fields BEFORE any fallible operation so that
+     * dispatcher_dealloc (triggered by Py_DECREF(self) on error) always
+     * sees defined values. */
     self->vectorcall = (vectorcallfunc)dispatcher_vectorcall;
-    Py_INCREF(self->default_impl);
     self->dict = NULL;
     self->dispatcher_name = NULL;
     self->public_name = NULL;
     self->relevant_arg_func = NULL;
+    self->default_impl = NULL;
     self->relevant_arg_positions = NULL;
     self->relevant_arg_names = NULL;
     self->n_relevant_args = 0;
+
+    PyObject *relevant_arg_spec;
+    PyObject *default_impl;
+    char *kwlist[] = {"", "", NULL};
+    if (!PyArg_ParseTupleAndKeywords(
+            args, kwargs, "OO:_ArrayFunctionDispatcher", kwlist,
+            &relevant_arg_spec, &default_impl)) {
+        Py_DECREF(self);
+        return NULL;
+    }
+    Py_INCREF(default_impl);
+    self->default_impl = default_impl;
 
     if (relevant_arg_spec == Py_None) {
         /* NULL relevant_arg_func means we use `like=` */
@@ -806,6 +826,13 @@ dispatcher_new(PyTypeObject *NPY_UNUSED(cls), PyObject *args, PyObject *kwargs)
          * the implementation's signature.
          */
         Py_ssize_t n = PyTuple_GET_SIZE(relevant_arg_spec);
+        if (n == 0) {
+            PyErr_SetString(PyExc_ValueError,
+                    "tuple-spec dispatcher requires at least one relevant "
+                    "argument name; got empty tuple");
+            Py_DECREF(self);
+            return NULL;
+        }
         if (n > NPY_MAXARGS) {
             PyErr_Format(PyExc_ValueError,
                     "too many relevant args (%zd > %d)", n, NPY_MAXARGS);
@@ -833,15 +860,10 @@ dispatcher_new(PyTypeObject *NPY_UNUSED(cls), PyObject *args, PyObject *kwargs)
             self->relevant_arg_names[i] = name;
             self->relevant_arg_positions[i] = pos;
         }
-        /* Fetch names to clean up TypeErrors (show actual name) */
-        self->public_name = PyObject_GetAttrString(
-            self->default_impl, "__qualname__");
-        if (self->public_name == NULL) {
-            Py_DECREF(self);
-            return NULL;
-        }
-        Py_INCREF(self->public_name);
-        self->dispatcher_name = self->public_name;
+        /* Tuple-spec dispatchers do not invoke a separate dispatcher
+         * function, so no name substitution is ever needed in error
+         * messages.  Leave dispatcher_name/public_name NULL so
+         * fix_name_if_typeerror short-circuits. */
     }
     else {
         self->relevant_arg_func = relevant_arg_spec;

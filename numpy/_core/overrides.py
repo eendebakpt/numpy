@@ -76,7 +76,11 @@ add_docstring(
     Returns
     -------
     Sequence of arguments with __array_function__ methods, in the order in
-    which they should be called.
+    which they should be called.  As an optimization, when every argument
+    is either an exact ``ndarray`` or a basic Python type (int, float, None,
+    slice, etc.) — none of which can carry a non-default
+    ``__array_function__`` — an empty sequence is returned instead, since
+    the caller will short-circuit to the default implementation.
     """)
 
 
@@ -108,21 +112,28 @@ def verify_matching_signatures(implementation, dispatcher):
 def _resolve_relevant_arg_spec(implementation, relevant_arg_names):
     """Resolve a tuple of arg names into ((name, position), ...) pairs.
 
-    Raises RuntimeError if any name is not found in the implementation's
-    signature.  Used by the fast-dispatch path.
+    Raises RuntimeError if the implementation has ``*args`` (positions
+    would be ambiguous at call time) or if any name is not found in the
+    implementation's signature.  Uses ``inspect.signature`` so decorated
+    implementations (with ``__wrapped__``) resolve correctly.
     """
-    co = implementation.__code__
-    n_args = co.co_argcount + co.co_kwonlyargcount
-    varnames = co.co_varnames[:n_args]
+    sig = inspect.signature(implementation)
+    positions = {}
+    for pos, (name, param) in enumerate(sig.parameters.items()):
+        if param.kind is inspect.Parameter.VAR_POSITIONAL:
+            raise RuntimeError(
+                f"tuple-spec dispatch does not support implementations "
+                f"with *args; got {implementation.__qualname__}")
+        if param.kind is inspect.Parameter.VAR_KEYWORD:
+            break
+        positions[name] = pos
     resolved = []
     for name in relevant_arg_names:
-        try:
-            pos = varnames.index(name)
-        except ValueError:
+        if name not in positions:
             raise RuntimeError(
                 f"relevant arg {name!r} not found in "
-                f"{implementation.__qualname__} signature") from None
-        resolved.append((name, pos))
+                f"{implementation.__qualname__} signature")
+        resolved.append((name, positions[name]))
     return tuple(resolved)
 
 
@@ -167,10 +178,16 @@ def array_function_dispatch(dispatcher=None, module=None, verify=True,
     Function suitable for decorating the implementation of a NumPy function.
 
     """
-    is_tuple_spec = (
-        dispatcher is not None
-        and not callable(dispatcher)
-        and isinstance(dispatcher, tuple))
+    # `type(dispatcher) is tuple` (not isinstance) matches the C-side
+    # `PyTuple_CheckExact` used by _ArrayFunctionDispatcher, so namedtuples
+    # and tuple subclasses take the callable-dispatcher path consistently
+    # on both sides.
+    is_tuple_spec = type(dispatcher) is tuple
+
+    if is_tuple_spec and docs_from_dispatcher:
+        raise TypeError(
+            "docs_from_dispatcher=True is not supported with a tuple-spec "
+            "dispatcher (there is no dispatcher function to copy docs from)")
 
     def decorator(implementation):
         if verify and not is_tuple_spec:

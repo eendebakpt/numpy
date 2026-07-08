@@ -801,3 +801,131 @@ def test_function_like():
     bound = np.mean.__get__(MyClass)  # classmethod
     with pytest.raises(TypeError, match="unsupported operand type"):
         bound()
+
+
+class TestTupleSpecDispatchRegression:
+    """Regression tests for the tuple-spec dispatcher path."""
+
+    def test_construction_failure_does_not_crash(self):
+        # Regression: dispatcher_new used to leave several fields
+        # uninitialized before PyArg_ParseTupleAndKeywords, so failed
+        # construction segfaulted in dispatcher_dealloc.
+        from numpy._core._multiarray_umath import _ArrayFunctionDispatcher
+        with pytest.raises(TypeError):
+            _ArrayFunctionDispatcher(42, 42, 42)  # too many args
+        with pytest.raises(TypeError):
+            _ArrayFunctionDispatcher(42)  # too few args
+        with pytest.raises(TypeError):
+            _ArrayFunctionDispatcher()  # no args
+
+    def test_empty_tuple_spec_rejected(self):
+        # An empty tuple would silently disable dispatch (all_safe stays 1).
+        with pytest.raises(ValueError, match="at least one relevant"):
+            @array_function_dispatch(())
+            def _f(a):
+                return a
+
+    def test_docs_from_dispatcher_incompatible_with_tuple_spec(self):
+        # There is no dispatcher function to copy docs from.
+        with pytest.raises(TypeError, match="docs_from_dispatcher"):
+            @array_function_dispatch(("a",), docs_from_dispatcher=True)
+            def _f(a):
+                return a
+
+    def test_var_positional_rejected(self):
+        # `*args` makes tuple-spec positions ambiguous at call time;
+        # previously silently resolved to the wrong index.
+        with pytest.raises(RuntimeError, match=r"\*args"):
+            @array_function_dispatch(("a", "out"))
+            def _f(a, *args, out=None):
+                return a
+
+    def test_unknown_arg_name_rejected(self):
+        with pytest.raises(RuntimeError, match="not found"):
+            @array_function_dispatch(("a", "missing"))
+            def _f(a, out=None):
+                return a
+
+    def test_wrapped_impl_signature_followed(self):
+        # `inspect.signature` follows __wrapped__; previously we read
+        # implementation.__code__ directly and would fail on decorated impls.
+        import functools
+
+        def _wrap(func):
+            @functools.wraps(func)
+            def wrapper(*args, **kwargs):
+                return func(*args, **kwargs)
+            return wrapper
+
+        @array_function_dispatch(("a", "out"))
+        @_wrap
+        def _f(a, out=None):
+            return a
+
+        assert _f(np.arange(3)) is not None
+
+    def test_namedtuple_not_treated_as_tuple_spec(self):
+        # `type(spec) is tuple` (not isinstance) matches the C-side
+        # PyTuple_CheckExact so tuple subclasses take the callable path
+        # consistently on both sides.
+        from collections import namedtuple
+        NT = namedtuple("NT", ["a", "b"])
+        spec = NT("a", "out")
+
+        # Should NOT be treated as tuple-spec; the callable-dispatcher path
+        # then rejects the non-callable, keeping behavior on both sides
+        # aligned.
+        with pytest.raises(TypeError):
+            @array_function_dispatch(spec)
+            def _f(a, out=None):
+                return a
+
+    def test_tuple_spec_dispatches_ndarray_subclass(self):
+        # Fast path must not fire on ndarray subclasses; overrides still
+        # dispatch normally.
+        calls = []
+
+        class Sub(np.ndarray):
+            def __array_function__(self, func, types, args, kwargs):
+                calls.append(func)
+                return "subclass-handled"
+
+        @array_function_dispatch(("a",))
+        def op(a):
+            return a
+
+        result = op(np.arange(3).view(Sub))
+        assert result == "subclass-handled"
+        assert calls == [op]
+
+    def test_tuple_spec_dispatches_duck_array(self):
+        # Fast path must not fire on duck arrays (with __array_function__).
+        calls = []
+
+        class Duck:
+            def __array_function__(self, func, types, args, kwargs):
+                calls.append(func)
+                return "duck-handled"
+
+        @array_function_dispatch(("a",))
+        def op(a):
+            return a
+
+        assert op(Duck()) == "duck-handled"
+        assert calls == [op]
+
+    def test_tuple_spec_out_keyword_dispatch(self):
+        # Fast path must extract out= kwarg and dispatch to it.
+        calls = []
+
+        class Duck:
+            def __array_function__(self, func, types, args, kwargs):
+                calls.append(func)
+                return "duck-out"
+
+        @array_function_dispatch(("a", "out"))
+        def op(a, out=None):
+            return a
+
+        assert op(np.arange(3), out=Duck()) == "duck-out"
+        assert calls == [op]
