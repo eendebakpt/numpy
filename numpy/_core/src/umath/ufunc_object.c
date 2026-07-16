@@ -2522,10 +2522,13 @@ finish_loop:
  * Try a fast path that bypasses NpyIter / PyUFunc_ReduceWrapper for full
  * reductions (axis=None) over a trivially iterable, aligned input where no
  * casting is required.  The strided reduce loop is called directly on the
- * input buffer and writes into a freshly allocated 0-d result.
+ * input buffer and writes into a freshly allocated 0-d result, or -- when
+ * ``return_scalar`` says the caller would convert the 0-d result to a
+ * scalar anyway -- into a stack buffer that is turned into the scalar
+ * directly.
  *
  * Returns:
- *      1 on success; ``*out_result`` holds the new 0-d result.
+ *      1 on success; ``*out_result`` holds the new 0-d array or scalar.
  *      0 if any precondition is unmet (caller should run the slow path);
  *        ``*out_result`` is NULL and no error is set.
  *     -1 on hard error during the fast path; ``*out_result`` is NULL and
@@ -2536,9 +2539,9 @@ try_reduce_contiguous(
         PyArrayMethod_Context *context, PyArrayObject *arr,
         PyArray_Descr *const *descrs,
         PyArrayObject *out, PyArrayObject *wheremask, PyObject *initial,
-        int ndim, int naxes, int keepdims,
+        int ndim, int naxes, int keepdims, int return_scalar,
         int errormask,
-        PyArrayObject **out_result)
+        PyObject **out_result)
 {
     NPY_BEGIN_THREADS_DEF;
     *out_result = NULL;
@@ -2561,20 +2564,34 @@ try_reduce_contiguous(
         return 0;
     }
 
-    /* Allocate the 0-d result first so the loop can write into it. */
-    Py_INCREF(descrs[0]);
-    PyArrayObject *result = (PyArrayObject *)PyArray_NewFromDescr(
-            &PyArray_Type, descrs[0], 0, NULL, NULL, NULL, 0, NULL);
-    if (result == NULL) {
-        return -1;
+    /*
+     * With ``return_scalar`` set, accumulate into a stack buffer and create
+     * the scalar from it at the end.  The scalar cannot be created up front:
+     * ``PyArray_Scalar`` needs the final value (e.g. for booleans it returns
+     * the value-dependent ``np.True_``/``np.False_`` singletons).
+     */
+    npy_clongdouble buffer;  /* aligned scratch large enough for any number */
+    PyArrayObject *result = NULL;
+    char *accum;
+    if (return_scalar) {
+        accum = (char *)&buffer;
     }
-    char *accum = PyArray_BYTES(result);
+    else {
+        /* Allocate the 0-d result first so the loop can write into it. */
+        result = (PyArrayObject *)PyArray_NewFromDescr(
+                &PyArray_Type, (PyArray_Descr *)Py_NewRef(descrs[0]),
+                0, NULL, NULL, NULL, 0, NULL);
+        if (result == NULL) {
+            return -1;
+        }
+        accum = PyArray_BYTES(result);
+    }
     int has_initial = 0;
     if (ufuncimpl->get_reduction_initial != NULL) {
         has_initial = ufuncimpl->get_reduction_initial(
                 context, /*reduction_is_empty=*/0, accum);
         if (has_initial < 0) {
-            Py_DECREF(result);
+            Py_XDECREF(result);
             return -1;
         }
     }
@@ -2596,8 +2613,7 @@ try_reduce_contiguous(
     }
     if (count == 0) {
         /* Single-element input with no identity -- accum already holds arr[0]. */
-        *out_result = result;
-        return 1;
+        goto finish;
     }
 
     npy_intp strides[3] = {0, arr_stride, 0};
@@ -2607,7 +2623,7 @@ try_reduce_contiguous(
     if (ufuncimpl->get_strided_loop(context, /*aligned=*/1,
             /*move_references=*/0, strides,
             &strided_loop, &auxdata, &flags) < 0) {
-        Py_DECREF(result);
+        Py_XDECREF(result);
         return -1;
     }
     int needs_fperr = !(flags & NPY_METH_NO_FLOATINGPOINT_ERRORS);
@@ -2628,19 +2644,31 @@ try_reduce_contiguous(
         res = _check_ufunc_fperr(errormask, "reduce");
     }
     if (res < 0) {
-        Py_DECREF(result);
+        Py_XDECREF(result);
         return -1;
     }
-    *out_result = result;
+finish:
+    if (return_scalar) {
+        *out_result = PyArray_Scalar(accum, descrs[0], NULL);
+        return *out_result == NULL ? -1 : 1;
+    }
+    *out_result = (PyObject *)result;
     return 1;
 }
 
 
-static PyArrayObject *
+/*
+ * Returns the result array, or -- when ``return_scalar`` is set and the
+ * contiguous fast path applies -- the already-converted numpy scalar.
+ * ``return_scalar`` must only be set when the caller would call
+ * ``PyArray_Return`` on a plain 0-d result (no ``out``, no
+ * ``__array_wrap__`` to apply).
+ */
+static PyObject *
 PyUFunc_Reduce(PyUFuncObject *ufunc,
         PyArrayObject *arr, PyArrayObject *out,
         int naxes, int *axes, PyArray_DTypeMeta *signature[3], int keepdims,
-        PyObject *initial, PyArrayObject *wheremask)
+        PyObject *initial, PyArrayObject *wheremask, int return_scalar)
 {
     int iaxes, ndim;
     npy_bool axis_flags[NPY_MAXDIMS];
@@ -2681,14 +2709,24 @@ PyUFunc_Reduce(PyUFuncObject *ufunc,
     context.caller = (PyObject *)ufunc;
     context.method = ufuncimpl;
 
-    PyArrayObject *result = NULL;
+    /*
+     * The fast path can only create the scalar directly for dtypes whose
+     * scalars are self-contained: ``PyArray_Scalar`` uses its ``base``
+     * argument for flexible and NPY_USE_GETITEM dtypes.
+     */
+    return_scalar = return_scalar
+            && descrs[0]->elsize <= (npy_intp)sizeof(npy_clongdouble)
+            && !PyTypeNum_ISFLEXIBLE(descrs[0]->type_num)
+            && !PyDataType_FLAGCHK(descrs[0], NPY_USE_GETITEM);
+
+    PyObject *result = NULL;
 
     int fast_status = try_reduce_contiguous(
             &context, arr, descrs, out, wheremask, initial,
-            ndim, naxes, keepdims, errormask, &result);
+            ndim, naxes, keepdims, return_scalar, errormask, &result);
     if (fast_status == 0) {
         /* Fast path did not apply; run the full reduction. */
-        result = PyUFunc_ReduceWrapper(&context,
+        result = (PyObject *)PyUFunc_ReduceWrapper(&context,
                 arr, out, wheremask, axis_flags, keepdims,
                 initial, reduce_loop, buffersize, ufunc_name, errormask);
     }
@@ -3830,8 +3868,13 @@ PyUFunc_GenericReduction(PyUFuncObject *ufunc,
 
     switch(operation) {
     case UFUNC_REDUCE:
-        ret = PyUFunc_Reduce(ufunc,
-                mp, out, naxes, axes, signature, keepdims, initial, wheremask);
+        /*
+         * The fast path may create the scalar directly, but only when the
+         * wrapping below would be a plain scalar conversion.
+         */
+        ret = (PyArrayObject *)PyUFunc_Reduce(ufunc,
+                mp, out, naxes, axes, signature, keepdims, initial, wheremask,
+                return_scalar && out == NULL && PyArray_CheckExact(op));
         Py_XSETREF(wheremask, NULL);
         break;
     case UFUNC_ACCUMULATE:
@@ -3875,6 +3918,11 @@ PyUFunc_GenericReduction(PyUFuncObject *ufunc,
     Py_DECREF(mp);
     Py_XDECREF(full_args.in);
     Py_XDECREF(full_args.out);
+
+    if (!PyArray_Check(ret)) {
+        /* The reduce fast path already created the scalar. */
+        return (PyObject *)ret;
+    }
 
     /* Wrap and return the output */
     PyObject *wrap, *wrap_type;
