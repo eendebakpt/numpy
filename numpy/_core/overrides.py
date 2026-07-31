@@ -14,43 +14,85 @@ from numpy._utils._inspect import getargspec
 
 ARRAY_FUNCTIONS = set()
 
-# ufunc.reduce positional argument order, used by the exact-ndarray
-# reduction fast path.  Public reduction functions (np.sum, np.any, ...)
-# use these same parameter names, which is how their signatures are
-# mapped onto a direct ufunc.reduce call in C.
-_REDUCE_SLOTS = {
-    "a": 0, "axis": 1, "dtype": 2, "out": 3,
-    "keepdims": 4, "initial": 5, "where": 6,
+# ufunc.reduce positional argument order and defaults, used to express
+# reduction=<ufunc> as a forward spec (see _resolve_forward_spec).
+_REDUCE_SLOT_NAMES = (
+    "a", "axis", "dtype", "out", "keepdims", "initial", "where")
+_REDUCE_DEFAULTS = {
+    "axis": None, "dtype": None, "out": None,
+    "keepdims": False, "initial": _NoValue, "where": True,
 }
-# Values for reduce arguments the caller did not pass (or passed as
-# np._NoValue).  Slot 0 (`a`) has no default: it is required.
-_REDUCE_DEFAULTS = (None, None, None, None, False, _NoValue, True)
 
 
-def _resolve_reduction_spec(implementation, ufunc, defaults_override):
-    """Map ``implementation``'s parameters onto ``ufunc.reduce`` arguments.
+def _resolve_forward_spec(implementation, target, slot_names,
+                          defaults_override):
+    """Map ``implementation``'s parameters onto a direct call of ``target``.
 
-    Returns ``(reduce_callable, slots, defaults)`` where ``slots[i]`` is the
-    reduce-argument index of the i-th parameter (aligned with the
-    ``param_names`` table from ``_resolve_relevant_arg_spec``) and
-    ``defaults`` holds the reduce-call value for every argument the caller
-    omitted.  The C dispatcher uses this to call ``ufunc.reduce`` directly
-    for exact-ndarray calls, skipping the Python wrapper entirely.
+    ``slot_names`` lists the target's argument slots in call order; a
+    leading ``"*"`` marks a slot that must be passed by keyword (those must
+    come last).  Public parameters are matched to slots by name; a public
+    parameter with no slot causes the fast path to decline when the caller
+    passes it.  Defaults for omitted arguments come from
+    ``defaults_override`` or else the public parameter's own default
+    (``np._NoValue`` defaults require an explicit override since targets
+    do not understand the sentinel).
+
+    Returns ``(target, slots, defaults, kwnames, n_slots, out_slot,
+    where_slot)`` where ``slots[i]`` is the target-slot of the i-th public
+    parameter (-1: declined), consumed by the C dispatcher to call
+    ``target`` directly for exact-ndarray calls, skipping the Python
+    wrapper entirely.
     """
-    defaults = list(_REDUCE_DEFAULTS)
+    names = [n.lstrip("*") for n in slot_names]
+    n_kw = sum(1 for n in slot_names if n.startswith("*"))
+    if n_kw and not all(n.startswith("*") for n in slot_names[-n_kw:]):
+        raise RuntimeError(
+            f"keyword slots must be trailing in {slot_names!r}")
+    kwnames = tuple(names[-n_kw:]) if n_kw else None
+    slot_of = {name: i for i, name in enumerate(names)}
+    if names[0] == "a":
+        pass  # slot 0 is the gated array argument by convention
+    else:
+        raise RuntimeError(f"first target slot must be 'a', got {names[0]!r}")
+
+    params = inspect.signature(implementation).parameters
+    slots = []
+    defaults = [None] * len(names)
+    filled = {0}
+    for name, param in params.items():
+        if param.kind not in (param.POSITIONAL_ONLY,
+                              param.POSITIONAL_OR_KEYWORD,
+                              param.KEYWORD_ONLY):
+            raise RuntimeError(
+                f"forward fast path cannot map parameter {name!r} of "
+                f"{implementation.__qualname__}")
+        slot = slot_of.get(name, -1)
+        slots.append(slot)
+        if slot <= 0:
+            continue
+        filled.add(slot)
+        if defaults_override and name in defaults_override:
+            defaults[slot] = defaults_override[name]
+        elif param.default is _NoValue:
+            raise RuntimeError(
+                f"parameter {name!r} of {implementation.__qualname__} "
+                f"defaults to np._NoValue; forward spec needs an explicit "
+                f"default override")
+        elif param.default is not param.empty:
+            defaults[slot] = param.default
     if defaults_override:
         for name, value in defaults_override.items():
-            defaults[_REDUCE_SLOTS[name]] = value
-    slots = []
-    for name, param in inspect.signature(implementation).parameters.items():
-        if (name not in _REDUCE_SLOTS
-                or param.kind not in (param.POSITIONAL_OR_KEYWORD,
-                                      param.KEYWORD_ONLY)):
-            raise RuntimeError(
-                f"reduction fast path cannot map parameter {name!r} of "
-                f"{implementation.__qualname__} onto ufunc.reduce")
-        slots.append(_REDUCE_SLOTS[name])
-    return (ufunc.reduce, tuple(slots), tuple(defaults))
+            if name not in slot_of:
+                raise KeyError(name)
+            defaults[slot_of[name]] = value
+            filled.add(slot_of[name])
+    missing = set(range(len(names))) - filled
+    if missing:
+        raise RuntimeError(
+            f"target slots {sorted(missing)} of {slot_names!r} have no "
+            f"public parameter and no default override")
+    return (target, tuple(slots), tuple(defaults), kwnames, len(names),
+            slot_of.get("out", -1), slot_of.get("where", -1))
 
 
 array_function_like_doc = (
@@ -231,7 +273,8 @@ def _resolve_relevant_arg_spec(implementation, relevant_arg_names):
 
 def array_function_dispatch(dispatcher=None, module=None, verify=True,
                             docs_from_dispatcher=False, reduction=None,
-                            reduction_defaults=None):
+                            reduction_defaults=None, forward=None,
+                            forward_defaults=None):
     """Decorator for adding dispatch with the __array_function__ protocol.
 
     See NEP-18 for example usage.
@@ -274,6 +317,18 @@ def array_function_dispatch(dispatcher=None, module=None, verify=True,
         Private: overrides for ``ufunc.reduce`` arguments the public
         signature does not expose (e.g. ``{"dtype": bool}`` for
         ``np.any``/``np.all``).
+    forward : (callable, tuple of str) or None, optional
+        Private: the decorated function is ``callable`` under a different
+        signature; the tuple lists the target's argument slots in call
+        order (a leading ``"*"`` marks keyword-only slots).  Enables an
+        exact-ndarray fast path that calls ``callable`` directly from C,
+        mapping arguments by parameter name (see ``_resolve_forward_spec``).
+        Typically the target is an ``ndarray`` method, replacing a
+        ``_wrapfunc``-style Python wrapper.  Requires a tuple-spec
+        dispatcher; mutually exclusive with ``reduction``.
+    forward_defaults : dict or None, optional
+        Private: overrides for target arguments whose public default is
+        ``np._NoValue`` or that the public signature does not expose.
 
     Returns
     -------
@@ -290,18 +345,31 @@ def array_function_dispatch(dispatcher=None, module=None, verify=True,
     if reduction is not None and not is_tuple_spec:
         raise TypeError(
             "reduction= requires a tuple-spec dispatcher")
+    if forward is not None:
+        if not is_tuple_spec:
+            raise TypeError("forward= requires a tuple-spec dispatcher")
+        if reduction is not None:
+            raise TypeError("forward= and reduction= are mutually exclusive")
 
     def decorator(implementation):
         if is_tuple_spec:
             spec, sig_info = _resolve_relevant_arg_spec(
                 implementation, dispatcher)
             if reduction is not None:
-                reduction_spec = _resolve_reduction_spec(
-                    implementation, reduction, reduction_defaults)
+                # reduction=<ufunc> is sugar for forwarding to ufunc.reduce
+                defaults = dict(_REDUCE_DEFAULTS)
+                if reduction_defaults:
+                    defaults.update(reduction_defaults)
+                forward_spec = _resolve_forward_spec(
+                    implementation, reduction.reduce, _REDUCE_SLOT_NAMES,
+                    defaults)
+            elif forward is not None:
+                forward_spec = _resolve_forward_spec(
+                    implementation, forward[0], forward[1], forward_defaults)
             else:
-                reduction_spec = None
+                forward_spec = None
             public_api = _ArrayFunctionDispatcher(
-                (spec, sig_info, reduction_spec), implementation)
+                (spec, sig_info, forward_spec), implementation)
         else:
             if verify:
                 if dispatcher is not None:

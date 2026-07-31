@@ -429,22 +429,31 @@ cleanup:
 }
 
 
-/* Number of positional arguments of ufunc.reduce. */
-#define NPY_REDUCE_NARGS 7
+/* Maximum number of target argument slots (ufunc.reduce has 7). */
+#define NPY_FORWARD_MAX_SLOTS 8
 
 /*
- * Reduction fast path state (see _resolve_reduction_spec): `call` is a
- * bound ufunc.reduce invoked directly for exact-ndarray calls, `defaults`
- * a tuple of NPY_REDUCE_NARGS values for omitted arguments, and `slots[i]`
- * the reduce-argument index of the i-th public parameter (aligned with
- * the dispatcher's param_names).  Allocated only for the few reduction
- * dispatchers, in one block via the flexible array member.
+ * Forward fast path state (see _resolve_forward_spec): `call` is a target
+ * callable (a bound ufunc.reduce, an unbound ndarray method, ...) invoked
+ * directly for exact-ndarray calls, `defaults` a tuple of n_slots values
+ * for omitted arguments, `kwnames` NULL or the trailing slots that the
+ * target only accepts by keyword, and `slots[i]` the target-slot of the
+ * i-th public parameter (aligned with the dispatcher's param_names;
+ * -1 declines the fast path when that parameter is passed).  out_slot and
+ * where_slot locate the arguments needing exactness gates (-1 if absent).
+ * Allocated only for forwarding dispatchers, in one block via the
+ * flexible array member.
  */
 typedef struct {
     PyObject *call;
     PyObject *defaults;
+    PyObject *kwnames;
+    int n_slots;
+    int n_pos;
+    int out_slot;
+    int where_slot;
     int slots[];
-} npy_reduction_info;
+} npy_forward_info;
 
 typedef struct {
     PyObject_HEAD
@@ -467,8 +476,8 @@ typedef struct {
     /* The relevant args are parameter indices into param_names. */
     int n_relevant_args;
     uint8_t *relevant_idx;
-    /* NULL unless this dispatcher has a reduction fast path. */
-    npy_reduction_info *reduction;
+    /* NULL unless this dispatcher has a forward fast path. */
+    npy_forward_info *forward;
     /* The following fields are used to clean up TypeError messages only: */
     PyObject *dispatcher_name;
     PyObject *public_name;
@@ -503,29 +512,35 @@ find_param_index(const PyArray_ArrayFunctionDispatcherObject *self,
 
 
 /*
- * Try the exact-ndarray reduction fast path: scatter the call's arguments
- * into ufunc.reduce's argument slots via the per-parameter table built by
- * _resolve_reduction_spec and call the bound reduce directly, bypassing
- * the Python wrapper.  Any mismatch (unknown/duplicate/excess argument,
- * non-exact array, missing `a`) falls back to normal dispatch, which
- * either handles overrides or raises the proper TypeError from the
- * Python implementation itself.
+ * Try the exact-ndarray forward fast path: scatter the call's arguments
+ * into the target's argument slots via the per-parameter table built by
+ * _resolve_forward_spec and call the target (a bound ufunc.reduce, an
+ * unbound ndarray method, ...) directly, bypassing the Python wrapper.
+ * Any mismatch (unknown/duplicate/excess/declined argument, non-exact
+ * array, missing `a`) falls back to normal dispatch, which either handles
+ * overrides or raises the proper TypeError from the Python implementation
+ * itself.
  * Returns 1 if handled, 0 to fall back, and -1 on error (*result set on 1).
  */
 static int
-try_reduction(PyArray_ArrayFunctionDispatcherObject *self,
+try_forward(PyArray_ArrayFunctionDispatcherObject *self,
         PyObject *const *args, Py_ssize_t nargsf, PyObject *kwnames,
         PyObject **result)
 {
-    const npy_reduction_info *red = self->reduction;
-    PyObject *slots[NPY_REDUCE_NARGS] = {NULL};
+    const npy_forward_info *fwd = self->forward;
+    PyObject *slots[NPY_FORWARD_MAX_SLOTS] = {NULL};
     Py_ssize_t nargs = PyVectorcall_NARGS(nargsf);
 
     if (nargs > self->n_pos_max) {
         return 0;
     }
     for (Py_ssize_t p = 0; p < nargs; p++) {
-        slots[red->slots[p]] = args[p];
+        int slot = fwd->slots[p];
+        if (slot < 0) {
+            /* parameter with no target slot was passed */
+            return 0;
+        }
+        slots[slot] = args[p];
     }
     Py_ssize_t nkwargs = (kwnames != NULL) ? PyTuple_GET_SIZE(kwnames) : 0;
     for (Py_ssize_t k = 0; k < nkwargs; k++) {
@@ -540,29 +555,42 @@ try_reduction(PyArray_ArrayFunctionDispatcherObject *self,
             /* unknown keyword or duplicate of a positional arg */
             return 0;
         }
-        slots[red->slots[i]] = args[nargs + k];
+        int slot = fwd->slots[i];
+        if (slot < 0) {
+            return 0;
+        }
+        slots[slot] = args[nargs + k];
     }
     if (slots[0] == NULL) {
         /* required `a` missing */
         return 0;
     }
-    for (int s = 1; s < NPY_REDUCE_NARGS; s++) {
+    for (int s = 1; s < fwd->n_slots; s++) {
         /* np._NoValue means "not passed" for the public functions */
         if (slots[s] == NULL || slots[s] == npy_static_pydata._NoValue) {
-            slots[s] = PyTuple_GET_ITEM(red->defaults, s);
+            slots[s] = PyTuple_GET_ITEM(fwd->defaults, s);
         }
     }
 
-    PyObject *a = slots[0], *out = slots[3], *where = slots[6];
-    if (!PyArray_CheckExact(a) ||
-            (out != Py_None && !PyArray_CheckExact(out)) ||
-            (where != Py_None && !PyBool_Check(where)
-                && !PyArray_CheckExact(where))) {
+    if (!PyArray_CheckExact(slots[0])) {
         return 0;
+    }
+    if (fwd->out_slot >= 0) {
+        PyObject *out = slots[fwd->out_slot];
+        if (out != Py_None && !PyArray_CheckExact(out)) {
+            return 0;
+        }
+    }
+    if (fwd->where_slot >= 0) {
+        PyObject *where = slots[fwd->where_slot];
+        if (where != Py_None && !PyBool_Check(where)
+                && !PyArray_CheckExact(where)) {
+            return 0;
+        }
     }
 
     *result = PyObject_Vectorcall(
-            red->call, slots, NPY_REDUCE_NARGS, NULL);
+            fwd->call, slots, fwd->n_pos, fwd->kwnames);
     return *result != NULL ? 1 : -1;
 }
 
@@ -575,10 +603,11 @@ dispatcher_dealloc(PyArray_ArrayFunctionDispatcherObject *self)
     Py_CLEAR(self->dict);
     Py_CLEAR(self->dispatcher_name);
     Py_CLEAR(self->public_name);
-    if (self->reduction != NULL) {
-        Py_XDECREF(self->reduction->call);
-        Py_XDECREF(self->reduction->defaults);
-        PyMem_Free(self->reduction);
+    if (self->forward != NULL) {
+        Py_XDECREF(self->forward->call);
+        Py_XDECREF(self->forward->defaults);
+        Py_XDECREF(self->forward->kwnames);
+        PyMem_Free(self->forward);
     }
     if (self->relevant_idx != NULL) {
         PyMem_Free(self->relevant_idx);
@@ -769,13 +798,13 @@ dispatcher_vectorcall(PyArray_ArrayFunctionDispatcherObject *self,
 
     int num_implementing_args;
 
-    if (self->reduction != NULL) {
-        int reduction_status = try_reduction(
+    if (self->forward != NULL) {
+        int forward_status = try_forward(
                 self, args, len_args, kwnames, &result);
-        if (reduction_status < 0) {
+        if (forward_status < 0) {
             return NULL;
         }
-        if (reduction_status == 1) {
+        if (forward_status == 1) {
             return result;
         }
         result = NULL;
@@ -1029,45 +1058,65 @@ init_relevant_arg_spec(
     }
 
     if (reduction_spec != Py_None) {
-        PyObject *reduce_call, *slots_tup, *defaults_tup;
-        if (!PyArg_ParseTuple(reduction_spec, "OO!O!:reduction",
-                &reduce_call, &PyTuple_Type, &slots_tup,
-                &PyTuple_Type, &defaults_tup)) {
+        PyObject *fwd_call, *slots_tup, *defaults_tup, *fwd_kwnames;
+        int n_slots, out_slot, where_slot;
+        if (!PyArg_ParseTuple(reduction_spec, "OO!O!Oiii:forward",
+                &fwd_call, &PyTuple_Type, &slots_tup,
+                &PyTuple_Type, &defaults_tup, &fwd_kwnames,
+                &n_slots, &out_slot, &where_slot)) {
             return -1;
         }
-        if (!PyCallable_Check(reduce_call)) {
+        if (!PyCallable_Check(fwd_call)) {
             PyErr_SetString(PyExc_TypeError,
-                    "reduction callable must be callable");
+                    "forward target must be callable");
             return -1;
         }
-        if (PyTuple_GET_SIZE(slots_tup) != n_params
-                || PyTuple_GET_SIZE(defaults_tup) != NPY_REDUCE_NARGS) {
+        Py_ssize_t n_kw = 0;
+        if (fwd_kwnames != Py_None) {
+            if (!PyTuple_CheckExact(fwd_kwnames)) {
+                PyErr_SetString(PyExc_TypeError,
+                        "forward kwnames must be a tuple or None");
+                return -1;
+            }
+            n_kw = PyTuple_GET_SIZE(fwd_kwnames);
+        }
+        if (n_slots <= 0 || n_slots > NPY_FORWARD_MAX_SLOTS
+                || n_kw >= n_slots
+                || PyTuple_GET_SIZE(slots_tup) != n_params
+                || PyTuple_GET_SIZE(defaults_tup) != n_slots
+                || out_slot < -1 || out_slot >= n_slots
+                || where_slot < -1 || where_slot >= n_slots) {
             PyErr_SetString(PyExc_ValueError,
-                    "reduction spec does not match the signature table");
+                    "forward spec does not match the signature table");
             return -1;
         }
-        npy_reduction_info *red = PyMem_Malloc(
-                sizeof(npy_reduction_info) + n_params * sizeof(int));
-        if (red == NULL) {
+        npy_forward_info *fwd = PyMem_Malloc(
+                sizeof(npy_forward_info) + n_params * sizeof(int));
+        if (fwd == NULL) {
             PyErr_NoMemory();
             return -1;
         }
         for (Py_ssize_t i = 0; i < n_params; i++) {
             long slot = PyLong_AsLong(PyTuple_GET_ITEM(slots_tup, i));
-            if (slot < 0 || slot >= NPY_REDUCE_NARGS) {
+            if (slot < -1 || slot >= n_slots) {
                 if (!PyErr_Occurred()) {
                     PyErr_SetString(PyExc_ValueError,
-                            "reduction slot out of range");
+                            "forward slot out of range");
                 }
-                PyMem_Free(red);
+                PyMem_Free(fwd);
                 return -1;
             }
-            red->slots[i] = (int)slot;
+            fwd->slots[i] = (int)slot;
         }
-        red->call = Py_NewRef(reduce_call);
-        red->defaults = Py_NewRef(defaults_tup);
-        /* Set last: its presence enables try_reduction. */
-        self->reduction = red;
+        fwd->n_slots = n_slots;
+        fwd->n_pos = n_slots - (int)n_kw;
+        fwd->out_slot = out_slot;
+        fwd->where_slot = where_slot;
+        fwd->call = Py_NewRef(fwd_call);
+        fwd->defaults = Py_NewRef(defaults_tup);
+        fwd->kwnames = fwd_kwnames == Py_None ? NULL : Py_NewRef(fwd_kwnames);
+        /* Set last: its presence enables try_forward. */
+        self->forward = fwd;
     }
     return 0;
 }
@@ -1098,7 +1147,7 @@ dispatcher_new(PyTypeObject *NPY_UNUSED(cls), PyObject *args, PyObject *kwargs)
     self->n_pos_max = 0;
     self->n_required = 0;
     self->has_varkw = 0;
-    self->reduction = NULL;
+    self->forward = NULL;
 
     PyObject *relevant_arg_spec;
     PyObject *default_impl;

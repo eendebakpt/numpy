@@ -116,7 +116,9 @@ def _wrapreduction_any_all(obj, ufunc, method, axis, out,
     return ufunc.reduce(obj, axis, bool, out, **passkwargs)
 
 
-@array_function_dispatch(("a", "out"))
+@array_function_dispatch(("a", "out"),
+                         forward=(mu.ndarray.take,
+                                  ("a", "indices", "axis", "out", "mode")))
 def take(a, indices, axis=None, out=None, mode='raise'):
     """
     Take elements from an array along an axis.
@@ -315,7 +317,9 @@ def top_k(a, k, /, *, axis=-1, mode="largest", sorted=True):
     return (values, indices)
 
 
-@array_function_dispatch(("a",))
+@array_function_dispatch(("a",),
+                         forward=(mu.ndarray.reshape,
+                                  ("a", "shape", "*order", "*copy")))
 def reshape(a, /, shape, order='C', *, copy=None):
     """
     Returns a reshaped ndarray without changing data.
@@ -541,7 +545,9 @@ def choose(a, choices, out=None, mode='raise'):
     return _wrapfunc(a, 'choose', choices, out=out, mode=mode)
 
 
-@array_function_dispatch(("a",))
+@array_function_dispatch(("a",),
+                         forward=(mu.ndarray.repeat,
+                                  ("a", "repeats", "axis")))
 def repeat(a, repeats, axis=None):
     """
     Repeat each element of an array after themselves
@@ -650,7 +656,9 @@ def put(a, ind, v, mode='raise'):
     return put(ind, v, mode=mode)
 
 
-@array_function_dispatch(("a",))
+@array_function_dispatch(("a",),
+                         forward=(mu.ndarray.swapaxes,
+                                  ("a", "axis1", "axis2")))
 def swapaxes(a, axis1, axis2):
     """
     Interchange two axes of an array.
@@ -698,7 +706,8 @@ def swapaxes(a, axis1, axis2):
     return _wrapfunc(a, 'swapaxes', axis1, axis2)
 
 
-@array_function_dispatch(("a",))
+@array_function_dispatch(("a",),
+                         forward=(mu.ndarray.transpose, ("a", "axes")))
 def transpose(a, axes=None):
     """
     Returns an array with axes transposed.
@@ -1209,7 +1218,9 @@ def sort(a, axis=-1, kind=None, order=None, *, stable=None, descending=np._NoVal
     return a
 
 
-@array_function_dispatch(("a",))
+@array_function_dispatch(("a",),
+                         forward=(mu.ndarray.argsort,
+                                  ("a", "axis", "kind", "order", "*stable")))
 def argsort(a, axis=-1, kind=None, order=None, *, stable=None, descending=np._NoValue):
     """
     Returns the indices that would sort an array.
@@ -1349,7 +1360,10 @@ def argsort(a, axis=-1, kind=None, order=None, *, stable=None, descending=np._No
         stable=stable,
     )
 
-@array_function_dispatch(("a", "out"))
+@array_function_dispatch(("a", "out"),
+                         forward=(mu.ndarray.argmax,
+                                  ("a", "axis", "out", "*keepdims")),
+                         forward_defaults={"keepdims": False})
 def argmax(a, axis=None, out=None, *, keepdims=np._NoValue):
     """
     Returns the indices of the maximum values along an axis.
@@ -1445,7 +1459,10 @@ def argmax(a, axis=None, out=None, *, keepdims=np._NoValue):
     return _wrapfunc(a, 'argmax', axis=axis, out=out, **kwds)
 
 
-@array_function_dispatch(("a", "out"))
+@array_function_dispatch(("a", "out"),
+                         forward=(mu.ndarray.argmin,
+                                  ("a", "axis", "out", "*keepdims")),
+                         forward_defaults={"keepdims": False})
 def argmin(a, axis=None, out=None, *, keepdims=np._NoValue):
     """
     Returns the indices of the minimum values along an axis.
@@ -1541,7 +1558,9 @@ def argmin(a, axis=None, out=None, *, keepdims=np._NoValue):
     return _wrapfunc(a, 'argmin', axis=axis, out=out, **kwds)
 
 
-@array_function_dispatch(("a", "v", "sorter"))
+@array_function_dispatch(("a", "v", "sorter"),
+                         forward=(mu.ndarray.searchsorted,
+                                  ("a", "v", "side", "sorter")))
 def searchsorted(a, v, side='left', sorter=None):
     """
     Find indices where elements should be inserted to maintain order.
@@ -1978,7 +1997,8 @@ def trace(a, offset=0, axis1=0, axis2=1, dtype=None, out=None):
         )
 
 
-@array_function_dispatch(("a",))
+@array_function_dispatch(("a",),
+                         forward=(mu.ndarray.ravel, ("a", "order")))
 def ravel(a, order='C'):
     """Return a contiguous flattened array.
 
@@ -2088,7 +2108,8 @@ def ravel(a, order='C'):
         return asanyarray(a).ravel(order=order)
 
 
-@array_function_dispatch(("a",))
+@array_function_dispatch(("a",),
+                         forward=(mu.ndarray.nonzero, ("a",)))
 def nonzero(a):
     """
     Return the indices of the elements that are non-zero.
@@ -2224,7 +2245,9 @@ def shape(a):
     return result
 
 
-@array_function_dispatch(("condition", "a", "out"))
+@array_function_dispatch(("condition", "a", "out"),
+                         forward=(mu.ndarray.compress,
+                                  ("a", "condition", "axis", "out")))
 def compress(condition, a, axis=None, out=None):
     """
     Return selected slices of an array along given axis.
@@ -2892,7 +2915,9 @@ def cumulative_sum(x, /, *, axis=None, dtype=None, out=None,
     return _cumulative_func(x, um.add, axis, dtype, out, include_initial)
 
 
-@array_function_dispatch(("a", "out"))
+@array_function_dispatch(("a", "out"),
+                         forward=(mu.ndarray.cumsum,
+                                  ("a", "axis", "dtype", "out")))
 def cumsum(a, axis=None, dtype=None, out=None):
     """
     Return the cumulative sum of the elements along a given axis.
@@ -3443,7 +3468,9 @@ def prod(a, axis=None, dtype=None, out=None, keepdims=np._NoValue,
                           keepdims, initial, where)
 
 
-@array_function_dispatch(("a", "out"))
+@array_function_dispatch(("a", "out"),
+                         forward=(mu.ndarray.cumprod,
+                                  ("a", "axis", "dtype", "out")))
 def cumprod(a, axis=None, dtype=None, out=None):
     """
     Return the cumulative product of elements along a given axis.
@@ -3601,7 +3628,9 @@ def size(a, axis=None):
         return math.prod(_shape[ax] for ax in axis)
 
 
-@array_function_dispatch(("a", "out"))
+@array_function_dispatch(("a", "out"),
+                         forward=(mu.ndarray.round,
+                                  ("a", "decimals", "out")))
 def round(a, decimals=0, out=None):
     """
     Evenly round to the given number of decimals.
@@ -3696,7 +3725,9 @@ def round(a, decimals=0, out=None):
     return _wrapfunc(a, 'round', decimals=decimals, out=out)
 
 
-@array_function_dispatch(("a", "out"))
+@array_function_dispatch(("a", "out"),
+                         forward=(mu.ndarray.round,
+                                  ("a", "decimals", "out")))
 def around(a, decimals=0, out=None):
     """
     Round an array to the given number of decimals.
