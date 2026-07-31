@@ -307,11 +307,14 @@ class TestVerifyMatchingSignatures:
             def _f(a, out=None):
                 return a
 
-        # parameters that cannot be mapped onto ufunc.reduce are rejected
-        with pytest.raises(RuntimeError, match="cannot map"):
-            @array_function_dispatch(("a", "out"), reduction=np.add)
-            def _g(a, out=None, bogus=None):
-                return a
+        # a parameter with no ufunc.reduce slot declines the fast path
+        # when passed (the Python implementation runs instead)
+        @array_function_dispatch(("a", "out"), reduction=np.add)
+        def _g(a, out=None, bogus=None):
+            return "python-impl"
+
+        assert _g(np.array([1, 2])) == 3
+        assert _g(np.array([1, 2]), bogus=1) == "python-impl"
 
         # unknown reduce argument names in the defaults are rejected
         with pytest.raises(KeyError):
