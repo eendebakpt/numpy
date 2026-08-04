@@ -227,35 +227,46 @@ PyUFunc_O_O_method(char **args, npy_intp const *dimensions, npy_intp const *step
         PyObject **out = (PyObject **)op1;
         /* We allow NULL, but try to guarantee non-NULL to downstream */
         assert(in1 != NULL);
-        PyObject *ret, *func;
-        /* hold obj: the attribute lookup can clear its array slot */
+        /* hold obj: the call can clear its array slot */
         PyObject *obj = Py_NewRef(in1 ? in1 : Py_None);
-        func = PyObject_GetAttr(obj, meth_name);
-        if (func != NULL && !PyCallable_Check(func)) {
-            Py_DECREF(func);
-            func = NULL;
-        }
-        if (func == NULL) {
-            PyObject *exc, *val, *tb;
-            PyTypeObject *type = Py_TYPE(obj);
-            PyErr_Fetch(&exc, &val, &tb);
-            PyErr_Format(PyExc_TypeError,
-                         "loop of ufunc does not support argument %d of "
-                         "type %s which has no callable %s method",
-                         i, type->tp_name, meth);
-            npy_PyErr_ChainExceptionsCause(exc, val, tb);
-            Py_XDECREF(func);
+        PyObject *ret = PyObject_CallMethodNoArgs(obj, meth_name);
+        if (ret == NULL) {
+            if (PyErr_ExceptionMatches(PyExc_AttributeError)) {
+                /*
+                 * A failed method lookup becomes an informative TypeError
+                 * (gh-7961).  An AttributeError raised by the method itself
+                 * carries a different `name` and is left unchanged.
+                 */
+                PyObject *exc, *val, *tb;
+                PyErr_Fetch(&exc, &val, &tb);
+                PyErr_NormalizeException(&exc, &val, &tb);
+                PyObject *name = PyObject_GetAttrString(val, "name");
+                int missing_method = 0;
+                if (name == NULL) {
+                    PyErr_Clear();
+                }
+                else {
+                    missing_method =
+                        PyObject_RichCompareBool(name, meth_name, Py_EQ);
+                    Py_DECREF(name);
+                }
+                if (missing_method == 1) {
+                    PyErr_Format(PyExc_TypeError,
+                                 "loop of ufunc does not support argument "
+                                 "%d of type %s which has no callable %s "
+                                 "method",
+                                 i, Py_TYPE(obj)->tp_name, meth);
+                    npy_PyErr_ChainExceptionsCause(exc, val, tb);
+                }
+                else {
+                    PyErr_Restore(exc, val, tb);
+                }
+            }
             Py_DECREF(obj);
             Py_DECREF(meth_name);
             return;
         }
         Py_DECREF(obj);
-        ret = PyObject_CallNoArgs(func);
-        Py_DECREF(func);
-        if (ret == NULL) {
-            Py_DECREF(meth_name);
-            return;
-        }
         Py_XDECREF(*out);
         *out = ret;
     }
