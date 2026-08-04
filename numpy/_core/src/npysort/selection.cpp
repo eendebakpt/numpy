@@ -89,7 +89,7 @@ inline bool argquickselect_dispatch(T* v, npy_intp* arg, npy_intp num, npy_intp 
 
 template <typename Tag, bool arg, bool reverse, typename type>
 NPY_NO_EXPORT int
-introselect_(type *v, npy_intp *tosort, npy_intp num, npy_intp kth, npy_intp *pivots, npy_intp *npiv);
+introselect_(type *v, npy_intp *tosort, npy_intp num, npy_intp kth, npy_intp *pivots, npy_intp *npiv, npy_intp nkth);
 
 /*
  *****************************************************************************
@@ -274,7 +274,7 @@ median_of_median5_(type *v, npy_intp *tosort, const npy_intp num,
     }
 
     if (nmed > 2) {
-        introselect_<Tag, arg, reverse>(v, tosort, nmed, nmed / 2, pivots, npiv);
+        introselect_<Tag, arg, reverse>(v, tosort, nmed, nmed / 2, pivots, npiv, 1);
     }
     return nmed / 2;
 }
@@ -324,7 +324,7 @@ dumb_select_(type *v, npy_intp *tosort, npy_intp num, npy_intp kth)
 template <typename Tag, bool arg, bool reverse, typename type>
 NPY_NO_EXPORT int
 introselect_(type *v, npy_intp *tosort, npy_intp num, npy_intp kth,
-             npy_intp *pivots, npy_intp *npiv)
+             npy_intp *pivots, npy_intp *npiv, npy_intp nkth)
 {
     Idx<arg> idx(tosort);
     Sortee<type, arg> sortee(v, tosort);
@@ -357,8 +357,12 @@ introselect_(type *v, npy_intp *tosort, npy_intp num, npy_intp kth,
     /*
      * use a faster O(n*kth) algorithm for very small kth
      * e.g. for interpolating percentile
+     * For multiple kth this is restricted to small ranges: it neither
+     * partitions nor stores pivots, so using it on large ranges for many
+     * close kth (dense multi-kth partition) would rescan the same range
+     * for every kth and turn the whole partition quadratic (see gh-32187).
      */
-    if (kth - low < 3) {
+    if (kth - low < 3 && (nkth == 1 || high - low < 64)) {
         dumb_select_<Tag, arg, reverse>(v + (arg ? 0 : low), tosort + (arg ? low : 0),
                                high - low + 1, kth - low);
         store_pivot(kth, kth, pivots, npiv);
@@ -464,7 +468,7 @@ introselect_noarg(void *v, npy_intp num, npy_intp kth, npy_intp *pivots,
         }
     }
     return introselect_<Tag, false, reverse>((typename Tag::type *)v, nullptr, num, kth,
-                                             pivots, npiv);
+                                             pivots, npiv, nkth);
 }
 
 template <typename Tag, bool reverse>
@@ -479,7 +483,7 @@ introselect_arg(void *v, npy_intp *tosort, npy_intp num, npy_intp kth,
         }
     }
     return introselect_<Tag, true, reverse>((typename Tag::type *)v, tosort, num, kth,
-                                            pivots, npiv);
+                                            pivots, npiv, nkth);
 }
 
 struct arg_map {
