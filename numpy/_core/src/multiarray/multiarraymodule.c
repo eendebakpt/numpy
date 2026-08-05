@@ -1946,6 +1946,53 @@ array_asfortranarray(PyObject *NPY_UNUSED(ignored),
 }
 
 
+/*
+ * Convert the `src` argument of copyto to an array (a 0-d one for Python
+ * scalars, honoring the NEP 50 behavior for the descriptor).
+ * Returns a new reference or NULL on error.
+ */
+static PyArrayObject *
+copyto_prepare_src(PyObject *src_obj, PyArrayObject *dst, NPY_CASTING casting)
+{
+    PyArrayObject *src =
+            (PyArrayObject *)PyArray_FromAny(src_obj, NULL, 0, 0, 0, NULL);
+    if (src == NULL) {
+        return NULL;
+    }
+    PyArray_DTypeMeta *DType = NPY_DTYPE(PyArray_DESCR(src));
+    Py_INCREF(DType);
+    if (npy_mark_tmp_array_if_pyscalar(src_obj, src, &DType)) {
+        /* The user passed a Python scalar */
+        PyArray_Descr *descr;
+        PyArray_DTypeMeta *dst_DType = NPY_DTYPE(PyArray_DESCR(dst));
+        bool is_npy_nan = PyFloat_Check(src_obj) && npy_isnan(PyFloat_AsDouble(src_obj));
+        if (!is_npy_nan && (dst_DType->type_num == NPY_TIMEDELTA ||
+                            dst_DType->type_num == NPY_DATETIME)) {
+            descr = PyArray_DESCR(dst);
+            Py_INCREF(descr);
+        }
+        else {
+            descr = npy_find_descr_for_scalar(src_obj, PyArray_DESCR(src), DType,
+                                              dst_DType);
+        }
+        Py_DECREF(DType);
+        if (descr == NULL) {
+            Py_DECREF(src);
+            return NULL;
+        }
+        int res = npy_update_operand_for_scalar(&src, src_obj, descr, casting);
+        Py_DECREF(descr);
+        if (res < 0) {
+            Py_XDECREF(src);
+            return NULL;
+        }
+    }
+    else {
+        Py_DECREF(DType);
+    }
+    return src;
+}
+
 static PyObject *
 array_copyto(PyObject *NPY_UNUSED(ignored),
         PyObject *const *args, Py_ssize_t len_args, PyObject *kwnames)
@@ -1971,38 +2018,9 @@ array_copyto(PyObject *NPY_UNUSED(ignored),
     }
     PyArrayObject *dst = (PyArrayObject *)dst_obj;
 
-    src = (PyArrayObject *)PyArray_FromAny(src_obj, NULL, 0, 0, 0, NULL);
+    src = copyto_prepare_src(src_obj, dst, casting);
     if (src == NULL) {
         goto fail;
-    }
-    PyArray_DTypeMeta *DType = NPY_DTYPE(PyArray_DESCR(src));
-    Py_INCREF(DType);
-    if (npy_mark_tmp_array_if_pyscalar(src_obj, src, &DType)) {
-        /* The user passed a Python scalar */
-        PyArray_Descr *descr;
-        PyArray_DTypeMeta *dst_DType = NPY_DTYPE(PyArray_DESCR(dst));
-        bool is_npy_nan = PyFloat_Check(src_obj) && npy_isnan(PyFloat_AsDouble(src_obj));
-        if (!is_npy_nan && (dst_DType->type_num == NPY_TIMEDELTA ||
-                            dst_DType->type_num == NPY_DATETIME)) {
-            descr = PyArray_DESCR(dst);
-            Py_INCREF(descr);
-        }
-        else {
-            descr = npy_find_descr_for_scalar(src_obj, PyArray_DESCR(src), DType,
-                                              dst_DType);
-        }
-        Py_DECREF(DType);
-        if (descr == NULL) {
-            goto fail;
-        }
-        int res = npy_update_operand_for_scalar(&src, src_obj, descr, casting);
-        Py_DECREF(descr);
-        if (res < 0) {
-            goto fail;
-        }
-    }
-    else {
-        Py_DECREF(DType);
     }
 
     if (wheremask_in != NULL) {
