@@ -877,8 +877,7 @@ check_for_trivial_loop(PyArrayMethodObject *ufuncimpl,
  */
 static int
 try_trivial_single_output_loop(PyArrayMethod_Context *context,
-        PyArrayObject *op[], NPY_ORDER order,
-        int errormask)
+        PyArrayObject *op[], NPY_ORDER order)
 {
     int nin = context->method->nin;
     int nop = nin + 1;
@@ -1020,6 +1019,15 @@ try_trivial_single_output_loop(PyArrayMethod_Context *context,
 
     if (res == 0 && !(flags & NPY_METH_NO_FLOATINGPOINT_ERRORS)) {
         /* NOTE: We could check float errors even when `res < 0` */
+        /*
+         * The errormask comes from a context variable, so the fetch is
+         * done lazily here: loops flagged with
+         * NPY_METH_NO_FLOATINGPOINT_ERRORS never need it.
+         */
+        int errormask;
+        if (_get_bufsize_errmask(NULL, &errormask) < 0) {
+            return -1;
+        }
         const char *name = ufunc_get_name_cstr((PyUFuncObject *)context->caller);
         res = _check_ufunc_fperr(errormask, name);
     }
@@ -2209,31 +2217,10 @@ PyUFunc_GenericFunctionInternal(PyUFuncObject *ufunc,
     npy_intp default_op_out_flags;
     npy_uint32 op_flags[NPY_MAXARGS];
 
-    /* These parameters come from a TLS global */
+    /* These parameters come from a TLS global (fetched lazily below) */
     int buffersize = 0, errormask = 0;
 
     NPY_UF_DBG_PRINT1("\nEvaluating ufunc %s\n", ufunc_get_name_cstr(ufunc));
-
-    /* Get the buffersize and errormask */
-    if (_get_bufsize_errmask(&buffersize, &errormask) < 0) {
-        return -1;
-    }
-
-    if (wheremask != NULL) {
-        /* Set up the flags. */
-        default_op_out_flags = NPY_ITER_NO_SUBTYPE |
-                               NPY_ITER_WRITEMASKED |
-                               NPY_UFUNC_DEFAULT_OUTPUT_FLAGS;
-        _ufunc_setup_flags(ufunc, NPY_UFUNC_DEFAULT_INPUT_FLAGS,
-                           default_op_out_flags, op_flags);
-    }
-    else {
-        /* Set up the flags. */
-        default_op_out_flags = NPY_ITER_WRITEONLY |
-                               NPY_UFUNC_DEFAULT_OUTPUT_FLAGS;
-        _ufunc_setup_flags(ufunc, NPY_UFUNC_DEFAULT_INPUT_FLAGS,
-                           default_op_out_flags, op_flags);
-    }
 
     /* Final preparation of the arraymethod call */
     PyArrayMethod_Context context;
@@ -2244,6 +2231,16 @@ PyUFunc_GenericFunctionInternal(PyUFuncObject *ufunc,
     /* Do the ufunc loop */
     if (wheremask != NULL) {
         NPY_UF_DBG_PRINT("Executing masked inner loop\n");
+
+        if (_get_bufsize_errmask(&buffersize, &errormask) < 0) {
+            return -1;
+        }
+        /* Set up the flags. */
+        default_op_out_flags = NPY_ITER_NO_SUBTYPE |
+                               NPY_ITER_WRITEMASKED |
+                               NPY_UFUNC_DEFAULT_OUTPUT_FLAGS;
+        _ufunc_setup_flags(ufunc, NPY_UFUNC_DEFAULT_INPUT_FLAGS,
+                           default_op_out_flags, op_flags);
 
         if (nop + 1 > NPY_MAXARGS) {
             PyErr_SetString(PyExc_ValueError,
@@ -2263,20 +2260,33 @@ PyUFunc_GenericFunctionInternal(PyUFuncObject *ufunc,
         /*
          * This checks whether a trivial loop is ok, making copies of
          * scalar and one dimensional operands if that should help.
+         * The buffersize is only used to decide whether to copy small
+         * unaligned/mismatched operands; use the default buffersize
+         * rather than fetching the errstate context variable, so that
+         * the trivial loop path does not need the fetch at all.
          */
         int trivial_ok = check_for_trivial_loop(ufuncimpl,
-                op, operation_descrs, casting, buffersize);
+                op, operation_descrs, casting, NPY_BUFSIZE);
         if (trivial_ok < 0) {
             return -1;
         }
         if (trivial_ok && context.method->nout == 1) {
             /* Try to handle everything without using the (heavy) iterator */
-            int retval = try_trivial_single_output_loop(&context,
-                    op, order, errormask);
+            int retval = try_trivial_single_output_loop(&context, op, order);
             if (retval != -2) {
                 return retval;
             }
         }
+
+        /* Fall back to the full iterator path */
+        if (_get_bufsize_errmask(&buffersize, &errormask) < 0) {
+            return -1;
+        }
+        /* Set up the flags. */
+        default_op_out_flags = NPY_ITER_WRITEONLY |
+                               NPY_UFUNC_DEFAULT_OUTPUT_FLAGS;
+        _ufunc_setup_flags(ufunc, NPY_UFUNC_DEFAULT_INPUT_FLAGS,
+                           default_op_out_flags, op_flags);
 
         return execute_ufunc_loop(&context, 0,
                 op, order, buffersize, casting, op_flags, errormask);
