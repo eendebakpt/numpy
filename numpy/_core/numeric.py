@@ -230,7 +230,13 @@ def ones(shape, dtype=None, order='C', *, device=None, like=None):
         )
 
     a = empty(shape, dtype, order, device=device)
-    multiarray.copyto(a, 1, casting='unsafe')
+    try:
+        # For dtypes that can represent the integer 1, ndarray.fill is
+        # equivalent to copyto(a, 1, casting='unsafe'), but much faster.
+        a.fill(1)
+    except TypeError:
+        # e.g. unstructured void dtypes cannot be filled with an integer
+        multiarray.copyto(a, 1, casting='unsafe')
     return a
 
 
