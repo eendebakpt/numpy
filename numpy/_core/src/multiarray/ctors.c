@@ -786,15 +786,21 @@ PyArray_NewFromDescr_int(
          *  array
          */
 
-        /* float errors do not matter and we do not release GIL */
-        NPY_ARRAYMETHOD_FLAGS zero_flags;
-        PyArrayMethod_GetTraverseLoop *get_fill_zero_loop =
-            NPY_DT_SLOTS(NPY_DTYPE(descr))->get_fill_zero_loop;
-        if (get_fill_zero_loop != NULL) {
-            if (get_fill_zero_loop(
-                    NULL, descr, 1, descr->elsize, &(fill_zero_info.func),
-                    &(fill_zero_info.auxdata), &zero_flags) < 0) {
-                goto fail;
+        /*
+         * The zero-filling loop is only needed for a zeroed array; skip the
+         * slot lookup entirely for plain (e.g. `empty`) allocations.
+         */
+        if (cflags & _NPY_ARRAY_ZEROED) {
+            /* float errors do not matter and we do not release GIL */
+            NPY_ARRAYMETHOD_FLAGS zero_flags;
+            PyArrayMethod_GetTraverseLoop *get_fill_zero_loop =
+                NPY_DT_SLOTS(NPY_DTYPE(descr))->get_fill_zero_loop;
+            if (get_fill_zero_loop != NULL) {
+                if (get_fill_zero_loop(
+                        NULL, descr, 1, descr->elsize, &(fill_zero_info.func),
+                        &(fill_zero_info.auxdata), &zero_flags) < 0) {
+                    goto fail;
+                }
             }
         }
 
