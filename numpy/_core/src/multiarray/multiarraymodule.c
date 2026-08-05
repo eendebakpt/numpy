@@ -1950,45 +1950,89 @@ array_asfortranarray(PyObject *NPY_UNUSED(ignored),
  * Convert the `src` argument of copyto to an array (a 0-d one for Python
  * scalars, honoring the NEP 50 behavior for the descriptor).
  * Returns a new reference or NULL on error.
+ *
+ * For Python bool/int/float/complex scalars the descriptor is resolved
+ * directly (`npy_mark_tmp_array_if_pyscalar` recognizes exactly these
+ * types), which avoids the full `PyArray_FromAny` coercion and the second
+ * temporary array `npy_update_operand_for_scalar` would create.
  */
 static PyArrayObject *
 copyto_prepare_src(PyObject *src_obj, PyArrayObject *dst, NPY_CASTING casting)
 {
-    PyArrayObject *src =
-            (PyArrayObject *)PyArray_FromAny(src_obj, NULL, 0, 0, 0, NULL);
-    if (src == NULL) {
-        return NULL;
+    PyArray_Descr *descr;
+
+    if (PyBool_Check(src_obj)) {
+        /* `PyArray_FromAny` would discover a 0-d bool array. */
+        descr = PyArray_DescrFromType(NPY_BOOL);
+        if (descr == NULL) {
+            return NULL;
+        }
     }
-    PyArray_DTypeMeta *DType = NPY_DTYPE(PyArray_DESCR(src));
-    Py_INCREF(DType);
-    if (npy_mark_tmp_array_if_pyscalar(src_obj, src, &DType)) {
+    else if (PyLong_CheckExact(src_obj) || PyFloat_CheckExact(src_obj) ||
+             PyComplex_CheckExact(src_obj)) {
         /* The user passed a Python scalar */
-        PyArray_Descr *descr;
         PyArray_DTypeMeta *dst_DType = NPY_DTYPE(PyArray_DESCR(dst));
-        bool is_npy_nan = PyFloat_Check(src_obj) && npy_isnan(PyFloat_AsDouble(src_obj));
+        PyArray_DTypeMeta *scalar_DType;
+        bool is_npy_nan = false;
+        if (PyLong_CheckExact(src_obj)) {
+            scalar_DType = &PyArray_PyLongDType;
+        }
+        else if (PyFloat_CheckExact(src_obj)) {
+            scalar_DType = &PyArray_PyFloatDType;
+            is_npy_nan = npy_isnan(PyFloat_AsDouble(src_obj));
+        }
+        else {
+            scalar_DType = &PyArray_PyComplexDType;
+        }
+
+        /* The descriptor `PyArray_FromAny` would have discovered. */
+        PyArray_Descr *original_descr =
+                NPY_DT_CALL_discover_descr_from_pyobject(
+                        scalar_DType, src_obj);
+        if (original_descr == NULL) {
+            return NULL;
+        }
         if (!is_npy_nan && (dst_DType->type_num == NPY_TIMEDELTA ||
                             dst_DType->type_num == NPY_DATETIME)) {
             descr = PyArray_DESCR(dst);
             Py_INCREF(descr);
         }
         else {
-            descr = npy_find_descr_for_scalar(src_obj, PyArray_DESCR(src), DType,
-                                              dst_DType);
+            descr = npy_find_descr_for_scalar(
+                    src_obj, original_descr, scalar_DType, dst_DType);
+            if (descr == NULL) {
+                Py_DECREF(original_descr);
+                return NULL;
+            }
         }
-        Py_DECREF(DType);
-        if (descr == NULL) {
-            Py_DECREF(src);
+        /* Matches the rejection in `npy_update_operand_for_scalar`. */
+        if (NPY_UNLIKELY(casting == NPY_EQUIV_CASTING) &&
+                descr->type_num != NPY_OBJECT &&
+                !PyArray_EquivTypes(original_descr, descr)) {
+            PyErr_Format(PyExc_TypeError,
+                    "cannot cast Python %s to %S under the casting rule "
+                    "'equiv'",
+                    Py_TYPE(src_obj)->tp_name, descr);
+            Py_DECREF(original_descr);
+            Py_DECREF(descr);
             return NULL;
         }
-        int res = npy_update_operand_for_scalar(&src, src_obj, descr, casting);
-        Py_DECREF(descr);
-        if (res < 0) {
-            Py_XDECREF(src);
-            return NULL;
-        }
+        Py_DECREF(original_descr);
     }
     else {
-        Py_DECREF(DType);
+        /* Not a Python scalar; the general conversion handles everything. */
+        return (PyArrayObject *)PyArray_FromAny(src_obj, NULL, 0, 0, 0, NULL);
+    }
+
+    /* `PyArray_NewFromDescr` steals the reference to `descr`. */
+    PyArrayObject *src = (PyArrayObject *)PyArray_NewFromDescr(
+            &PyArray_Type, descr, 0, NULL, NULL, NULL, 0, NULL);
+    if (src == NULL) {
+        return NULL;
+    }
+    if (PyArray_SETITEM(src, PyArray_BYTES(src), src_obj) < 0) {
+        Py_DECREF(src);
+        return NULL;
     }
     return src;
 }
