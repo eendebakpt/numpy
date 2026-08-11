@@ -4856,6 +4856,111 @@ try_trivial_scalar_call(
     return ret;
 }
 
+
+/*
+ * Fast path for a unary ufunc call on an exact, contiguous, aligned array
+ * with the singleton descr: one dispatch-cache lookup resolves the method
+ * and output dtype, and the strided loop fills a freshly allocated output.
+ * Returns 0 on success (*result set), -2 if the fast path does not apply
+ * (caller falls back), and -1 on error.
+ */
+static int
+try_unary_contiguous_call(
+        PyUFuncObject *ufunc, PyArrayObject *in,
+        PyArray_DTypeMeta *in_DType, PyObject **result)
+{
+    assert(ufunc->nin == 1 && ufunc->nout == 1 && !ufunc->core_enabled);
+
+    NPY_BEGIN_THREADS_DEF;
+
+    PyArray_Descr *in_descr = PyArray_DESCR(in);
+    if (in_descr != in_DType->singleton
+            || !PyArray_ISCONTIGUOUS(in) || !PyArray_ISALIGNED(in)) {
+        return -2;
+    }
+
+    PyArray_DTypeMeta *op_dt[2] = {in_DType, NULL};
+    PyObject *info = PyArrayIdentityHash_GetItem(  // borrowed reference
+            (PyArrayIdentityHash *)ufunc->_dispatch_cache,
+            (PyObject **)op_dt);
+    if (info == NULL) {
+        return -2;
+    }
+    PyArrayMethodObject *method =
+            (PyArrayMethodObject *)PyTuple_GET_ITEM(info, 1);
+    if (!PyObject_TypeCheck(method, &PyArrayMethod_Type)
+            || method->resolve_descriptors_with_scalars != NULL) {
+        return -2;
+    }
+    PyObject *all_dtypes = PyTuple_GET_ITEM(info, 0);
+    /* Reject promoted loops (e.g. bool -> uint8 for bitwise_count). */
+    if (PyTuple_GET_ITEM(all_dtypes, 0) != (PyObject *)in_DType) {
+        return -2;
+    }
+    PyArray_DTypeMeta *out_DType =
+            (PyArray_DTypeMeta *)PyTuple_GET_ITEM(all_dtypes, 1);
+    PyArray_Descr *out_descr = out_DType->singleton;
+    /* No parametric (datetime, strings) or refcounted dtypes. */
+    if (out_descr == NULL || PyDataType_REFCHK(in_descr)
+            || PyDataType_REFCHK(out_descr)) {
+        return -2;
+    }
+
+    PyArrayObject *out = (PyArrayObject *)PyArray_NewFromDescr(
+            &PyArray_Type, (PyArray_Descr *)Py_NewRef(out_descr),
+            PyArray_NDIM(in), PyArray_SHAPE(in), NULL, NULL, 0, NULL);
+    if (out == NULL) {
+        return -1;
+    }
+
+    PyArrayMethod_Context context;
+    PyArray_Descr *descrs[2] = {in_descr, out_descr};
+    NPY_context_init(&context, descrs);
+    context.caller = (PyObject *)ufunc;
+    context.method = method;
+
+    npy_intp strides[2] = {in_descr->elsize, out_descr->elsize};
+    char *data[2] = {PyArray_BYTES(in), PyArray_BYTES(out)};
+    npy_intp count = PyArray_SIZE(in);
+
+    PyArrayMethod_StridedLoop *strided_loop;
+    NpyAuxData *auxdata = NULL;
+    NPY_ARRAYMETHOD_FLAGS flags = 0;
+    if (method->get_strided_loop(&context, 1, 0, strides,
+                                 &strided_loop, &auxdata, &flags) < 0) {
+        Py_DECREF(out);
+        return -1;
+    }
+
+    if (!(flags & NPY_METH_NO_FLOATINGPOINT_ERRORS)) {
+        npy_clear_floatstatus();
+    }
+    if (!(flags & NPY_METH_REQUIRES_PYAPI)) {
+        NPY_BEGIN_THREADS_THRESHOLDED(count);
+    }
+    int ret = strided_loop(&context, data, &count, strides, auxdata);
+    NPY_END_THREADS;
+    NPY_AUXDATA_FREE(auxdata);
+
+    if (ret == 0 && PyErr_Occurred()) {
+        ret = -1;
+    }
+    if (ret == 0 && !(flags & NPY_METH_NO_FLOATINGPOINT_ERRORS)) {
+        int fpe_errors = npy_get_floatstatus();
+        if (fpe_errors && PyUFunc_GiveFloatingpointErrors(
+                ufunc_get_name_cstr(ufunc), fpe_errors) < 0) {
+            ret = -1;
+        }
+    }
+    if (ret < 0) {
+        Py_DECREF(out);
+        return -1;
+    }
+    *result = (PyObject *)out;
+    return 0;
+}
+
+
 /*
  * Main ufunc call implementation.
  *
@@ -5131,6 +5236,29 @@ ufunc_generic_fastcall(PyUFuncObject *ufunc,
             where_obj, &wheremask,
             keepdims_obj, &keepdims) < 0) {
         goto fail;
+    }
+
+    if (nin == 1 && nout == 1 && !ufunc->core_enabled
+            && len_args == 1 && kwnames == NULL
+            && PyArray_CheckExact(args[0])) {
+        assert(!force_legacy_promotion);
+        assert(!promoting_pyscalars);
+        PyObject *fast_result = NULL;
+        int fast_status = try_unary_contiguous_call(
+                ufunc, operands[0], operand_DTypes[0], &fast_result);
+        if (fast_status != -2) {
+            if (fast_status < 0) {
+                goto fail;
+            }
+            Py_DECREF(operands[0]);
+            Py_DECREF(operand_DTypes[0]);
+            npy_free_workspace(scratch_objs);
+            if (PyArray_NDIM((PyArrayObject *)fast_result) == 0) {
+                /* return_scalar is always true here (no out=...) */
+                return PyArray_Return((PyArrayObject *)fast_result);
+            }
+            return fast_result;
+        }
     }
 
     /*
