@@ -2938,9 +2938,7 @@ PyUFunc_Reduce(PyUFuncObject *ufunc,
                 initial, reduce_loop, buffersize, ufunc_name, errormask);
     }
     /* Fall through to shared cleanup of `descrs`. */
-    for (int i = 0; i < 2 * ufunc->nout + 1; i++) {
-        Py_DECREF(descrs[i]);
-    }
+    multi_DECREF((PyObject *const *)descrs, 2 * ufunc->nout + 1);
     return result;
 }
 
@@ -6747,9 +6745,7 @@ free_ufunc_call_info(PyObject *self)
     PyArrayMethod_Context *context = call_info->context;
 
     int nargs = context->method->nin + context->method->nout;
-    for (int i = 0; i < nargs; i++) {
-        Py_DECREF(context->descriptors[i]);
-    }
+    multi_DECREF((PyObject *const *)context->descriptors, nargs);
     Py_DECREF(context->caller);
     Py_DECREF(context->method);
     NPY_AUXDATA_FREE(call_info->auxdata);
