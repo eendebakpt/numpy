@@ -4667,6 +4667,16 @@ set_typeinfo(PyObject *dict)
     if (dtypemeta == NULL) {
         return -1;
     }
+#if defined(Py_GIL_DISABLED) && PY_VERSION_HEX >= 0x030e0000
+    /* Ufunc calls INCREF/DECREF the DType class on every call; immortalize
+     * to avoid refcount contention.  The compat PyUnstable_SetImmortal
+     * refuses objects that already have references, so use the CPython
+     * helper directly. */
+    {
+        PyAPI_FUNC(void) _Py_SetImmortal(PyObject *op);
+        _Py_SetImmortal((PyObject *)dtypemeta);
+    }
+#endif
     NPY_DT_SLOTS(dtypemeta)->setitem = @NAME@_setitem;
     NPY_DT_SLOTS(dtypemeta)->get_constant = @NAME@_get_constant;
 
