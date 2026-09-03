@@ -5497,6 +5497,11 @@ PyUFunc_FromFuncAndDataAndSignatureAndIdentity(PyUFuncGenericFunction *func, voi
      *       datetimes, this meant that `timedelta.sum(dtype="f8")` returned
      *       datetimes (and not floats or error), arguably wrong, but...
      */
+#if defined(Py_GIL_DISABLED) && PY_VERSION_HEX >= 0x030e0000
+    /* Ufuncs are shared, long-lived callables; let the interpreter skip
+     * refcounting them like functions and builtins. */
+    (void)PyUnstable_Object_EnableDeferredRefcount((PyObject *)ufunc);
+#endif
     return (PyObject *)ufunc;
 }
 
