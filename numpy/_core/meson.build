@@ -1341,6 +1341,7 @@ src_umath = umath_gen_headers + [
   'src/umath/override.c',
   'src/umath/reduction.c',
   src_file.process('src/umath/scalarmath.c.src'),
+  'src/umath/all_equal.c',
   'src/umath/ufunc_object.c',
   'src/umath/umathmodule.c',
   'src/umath/real_imag_ufuncs.cpp',
