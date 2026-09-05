@@ -542,6 +542,9 @@ class TestPositionalOnlyKeywordCalls:
     # __array_function__ implementors.  Before the tuple-spec conversion,
     # duck arrays dispatched on such calls while plain ndarrays raised.
     @pytest.mark.parametrize("func", [
+        np.matrix_transpose,
+        np.linalg.matrix_transpose,
+        np.linalg.svdvals,
         # array-API mandated (x, /) signatures (gh-31943 review)
         np.unique_all,
         np.unique_counts,
