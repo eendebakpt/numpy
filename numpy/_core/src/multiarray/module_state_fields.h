@@ -70,7 +70,9 @@ extern "C" {
     F(microsecond)          \
     F(tzinfo)               \
     F(utcoffset)            \
-    F(total_seconds)
+    F(total_seconds)        \
+    F(reduce)               \
+    F(accumulate)
 
 #define NPY_STATIC_PYDATA_FIELDS(F) \
     F(default_truediv_type_tup)    \
@@ -107,6 +109,9 @@ extern "C" {
     F(kwnames_is_copy)             \
     F(wrapit_kwnames_subok)        \
     F(wrapit_kwnames_to_scalar)    \
+    F(kwnames_dtype)               \
+    F(kwnames_out)                 \
+    F(kwnames_dtype_out)           \
     F(axes_1d_obj_kwargs)          \
     F(axes_2d_obj_kwargs)          \
     F(cpu_dispatch_registry)       \

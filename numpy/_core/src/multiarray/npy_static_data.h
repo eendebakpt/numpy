@@ -73,6 +73,8 @@ typedef struct npy_interned_str_struct {
     PyObject *tzinfo;
     PyObject *utcoffset;
     PyObject *total_seconds;
+    PyObject *reduce;
+    PyObject *accumulate;
 } npy_interned_str_struct;
 
 /*
@@ -169,6 +171,10 @@ typedef struct npy_static_pydata_struct {
      */
     PyObject *wrapit_kwnames_subok;
     PyObject *wrapit_kwnames_to_scalar;
+
+    PyObject *kwnames_dtype;
+    PyObject *kwnames_out;
+    PyObject *kwnames_dtype_out;
 
     /*
      * Used in __imatmul__ to avoid building tuples inline
