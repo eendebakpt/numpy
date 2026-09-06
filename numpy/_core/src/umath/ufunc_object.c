@@ -4745,8 +4745,8 @@ execute_unary_trivial_loop(
     PyArrayMethod_StridedLoop *strided_loop;
     NpyAuxData *auxdata = NULL;
     NPY_ARRAYMETHOD_FLAGS flags = 0;
-    if (context->method->get_strided_loop(context, 1, 0, strides,
-                                          &strided_loop, &auxdata, &flags) < 0) {
+    if (context->method->get_strided_loop(
+            context, 1, 0, strides, &strided_loop, &auxdata, &flags) < 0) {
         return -1;
     }
 
@@ -4829,7 +4829,8 @@ get_unary_trivial_loop(PyUFuncObject *ufunc, PyArray_DTypeMeta *in_DType,
     PyArrayMethodObject *method =
             (PyArrayMethodObject *)PyTuple_GET_ITEM(info, 1);
     if (!PyObject_TypeCheck(method, &PyArrayMethod_Type)
-            || method->resolve_descriptors != &simple_legacy_resolve_descriptors) {
+            || (method->resolve_descriptors
+                != &simple_legacy_resolve_descriptors)) {
         return -2;
     }
     // Reject promoted loops (e.g. bool -> uint8 for bitwise_count).
@@ -5055,7 +5056,7 @@ ufunc_generic_fastcall(PyUFuncObject *ufunc,
             }
         }
         else if (!PyArray_Check(args[0])) {
-            // Possibly scalar input, try the fast path, falling back on failure.
+            // Possibly scalar input, try the fast path, fall back on failure.
             if (try_trivial_scalar_call(ufunc, args[0], &result) != -2) {
                 return result;
             }
