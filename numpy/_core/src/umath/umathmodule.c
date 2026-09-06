@@ -183,7 +183,6 @@ int initumath(PyObject *m)
     UFUNC_FLOATING_POINT_SUPPORT = 0;
 #endif
 
-    /* Add some symbolic constants to the module */
     d = PyModule_GetDict(m);
 
     if (InitOperators(d) < 0) {
@@ -207,6 +206,7 @@ int initumath(PyObject *m)
     }
 #endif
 
+    /* Add some symbolic constants to the module */
     PyDict_SetItemString(d, "pi", s = PyFloat_FromDouble(NPY_PI));
     Py_DECREF(s);
     PyDict_SetItemString(d, "e", s = PyFloat_FromDouble(NPY_E));
