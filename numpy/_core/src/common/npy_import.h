@@ -18,11 +18,6 @@ extern "C" {
  * can be initialized at any time by npy_cache_import_runtime.
  */
 typedef struct npy_runtime_imports_struct {
-#ifdef NPY_USE_LEGACY_LOCK
-    PyThread_type_lock import_mutex;
-#else
-    PyMutex import_mutex;
-#endif
     PyObject *_add_dtype_helper;
     PyObject *_all;
     PyObject *_amax;
@@ -54,8 +49,6 @@ typedef struct npy_runtime_imports_struct {
     PyObject *_view_is_safe;
     PyObject *_void_scalar_to_string;
 } npy_runtime_imports_struct;
-
-NPY_VISIBILITY_HIDDEN extern npy_runtime_imports_struct npy_runtime_imports;
 
 /*! \brief Import a Python object.
 

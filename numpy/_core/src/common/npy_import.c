@@ -7,13 +7,18 @@
 #include <string.h>
 
 
-NPY_VISIBILITY_HIDDEN npy_runtime_imports_struct npy_runtime_imports;
+/* Process global mutex to serialize first time imports. */
+#ifdef NPY_USE_LEGACY_LOCK
+static PyThread_type_lock npy_import_mutex = NULL;
+#else
+static PyMutex npy_import_mutex;
+#endif
 
 NPY_NO_EXPORT int
 init_import_mutex(void) {
 #ifdef NPY_USE_LEGACY_LOCK
-    npy_runtime_imports.import_mutex = PyThread_allocate_lock();
-    if (npy_runtime_imports.import_mutex == NULL) {
+    npy_import_mutex = PyThread_allocate_lock();
+    if (npy_import_mutex == NULL) {
         PyErr_NoMemory();
         return -1;
     }
@@ -75,17 +80,17 @@ npy_cache_import_runtime(const char *module, const char *attr, PyObject **obj) {
             return -1;
         }
 #ifdef NPY_USE_LEGACY_LOCK
-        PyThread_acquire_lock(npy_runtime_imports.import_mutex, WAIT_LOCK);
+        PyThread_acquire_lock(npy_import_mutex, WAIT_LOCK);
 #else
-        PyMutex_Lock(&npy_runtime_imports.import_mutex);
+        PyMutex_Lock(&npy_import_mutex);
 #endif
         if (!atomic_load_explicit((_Atomic(PyObject *) *)obj, memory_order_acquire)) {
             atomic_store_explicit((_Atomic(PyObject *) *)obj, Py_NewRef(value), memory_order_release);
         }
 #ifdef NPY_USE_LEGACY_LOCK
-        PyThread_release_lock(npy_runtime_imports.import_mutex);
+        PyThread_release_lock(npy_import_mutex);
 #else
-        PyMutex_Unlock(&npy_runtime_imports.import_mutex);
+        PyMutex_Unlock(&npy_import_mutex);
 #endif
         Py_DECREF(value);
     }

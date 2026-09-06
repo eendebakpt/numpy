@@ -1,6 +1,10 @@
 #ifndef NUMPY_CORE_SRC_MULTIARRAY_NUMBER_H_
 #define NUMPY_CORE_SRC_MULTIARRAY_NUMBER_H_
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 typedef struct {
     PyObject *add;
     PyObject *subtract;
@@ -45,8 +49,9 @@ typedef struct {
     PyObject *imag;
 } NumericOps;
 
-extern NPY_NO_EXPORT NumericOps n_ops;
+#ifndef Py_LIMITED_API  /* PyNumberMethods is not in the Limited API */
 extern NPY_NO_EXPORT PyNumberMethods array_as_number;
+#endif
 
 NPY_NO_EXPORT PyObject *
 array_int(PyArrayObject *v);
@@ -67,5 +72,9 @@ PyArray_GenericReduceFunction(PyArrayObject *m1, PyObject *op, int axis,
 NPY_NO_EXPORT PyObject *
 PyArray_GenericAccumulateFunction(PyArrayObject *m1, PyObject *op, int axis,
                                   int rtype, PyArrayObject *out);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif  /* NUMPY_CORE_SRC_MULTIARRAY_NUMBER_H_ */

@@ -60,6 +60,9 @@ typedef struct npy_interned_str_struct {
     PyObject *partition;
     PyObject *argpartition;
     PyObject *_set_dtype;
+    PyObject *conjugate;
+    PyObject *astimezone;
+    PyObject *value;
     PyObject *year;
     PyObject *month;
     PyObject *day;
@@ -225,10 +228,6 @@ typedef struct npy_static_cdata_struct {
      */
     npy_int16 _letter_to_num['z' + 1 - '?'];
 } npy_static_cdata_struct;
-
-NPY_VISIBILITY_HIDDEN extern npy_interned_str_struct npy_interned_str;
-NPY_VISIBILITY_HIDDEN extern npy_static_pydata_struct npy_static_pydata;
-NPY_VISIBILITY_HIDDEN extern npy_static_cdata_struct npy_static_cdata;
 
 #ifdef __cplusplus
 }

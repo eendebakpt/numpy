@@ -146,6 +146,21 @@ class TestUfuncGenericLoops:
         x = np.full(10, foo(), dtype=object)
         assert_(np.all(np.conjugate(x) == True))
 
+    def test_unary_PyUFunc_O_O_method_reentrant_mutation(self):
+        # gh-31988: the error path read the type of the input operand after
+        # the attribute lookup ran code that cleared the operand's array
+        # slot (use-after-free, detectable with PYTHONMALLOC=debug).
+        class Evil:
+            @property
+            def conjugate(self):
+                arr[0] = None  # drops the slot's reference
+                return 42  # not callable
+
+        arr = np.empty(1, dtype=object)
+        arr[0] = Evil()
+        with pytest.raises(TypeError, match="no callable conjugate method"):
+            np.conjugate(arr)
+
     def test_binary_PyUFunc_OO_O(self):
         x = np.ones(10, dtype=object)
         assert_(np.all(np.add(x, x) == 2))
@@ -3274,6 +3289,13 @@ class TestLowlevelAPIAccess:
         # Check NEP 50 "weak" promotion also:
         r = np.add.resolve_dtypes((f4, int, None))
         assert r == (f4, f4, f4)
+
+        msg = r"cannot cast Python.*under the casting rule 'equiv'"
+        for pytype, dtype in [(int, "uint8"), (float, "float32"),
+                              (complex, "complex64")]:
+            with pytest.raises(TypeError, match=msg):
+                np.add.resolve_dtypes((np.dtype(dtype), pytype, None),
+                                      casting="equiv")
 
         with pytest.raises(TypeError):
             np.add.resolve_dtypes((i4, f4, None), casting="no")
