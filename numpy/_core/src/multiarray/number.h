@@ -49,7 +49,9 @@ typedef struct {
     PyObject *imag;
 } NumericOps;
 
+#ifndef Py_LIMITED_API  /* PyNumberMethods is not in the Limited API */
 extern NPY_NO_EXPORT PyNumberMethods array_as_number;
+#endif
 
 NPY_NO_EXPORT PyObject *
 array_int(PyArrayObject *v);

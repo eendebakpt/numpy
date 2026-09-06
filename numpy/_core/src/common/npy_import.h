@@ -9,6 +9,10 @@
 extern "C" {
 #endif
 
+#if PY_VERSION_HEX < 0x30d00b3 || defined(Py_LIMITED_API)
+    #define NPY_USE_LEGACY_LOCK 1
+#endif
+
 /*
  * Cached references to objects obtained via an import. All of these are
  * can be initialized at any time by npy_cache_import_runtime.
