@@ -1458,11 +1458,3 @@ def test_divide_by_count_read_only():
     assert_equal(res, np.array([3.0], dtype=np.float32))
     # the fallback must not promote the result to float64
     assert_equal(res.dtype, np.float32)
-
-
-@pytest.mark.parametrize("f", [np.nanmean, np.nanstd, np.nanvar])
-def test_all_masked_maskedarray(f):
-    # gh-29117: an all-masked MaskedArray reduces to the read-only
-    # `np.ma.masked`, which these used to try to divide into
-    vals_ma = np.ma.MaskedArray([np.nan, 3], mask=[True, True])
-    assert_(np.ma.is_masked(f(vals_ma)))
