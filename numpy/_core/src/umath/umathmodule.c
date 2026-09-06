@@ -174,6 +174,23 @@ ufunc_frompyfunc(PyObject *NPY_UNUSED(dummy), PyObject *args, PyObject *kwds) {
 
 /* Setup the umath part of the module */
 
+/* Add a float constant; immortal on free-threaded builds to avoid
+ * refcount contention when threads read e.g. ``np.pi``. */
+static int
+add_float_constant(PyObject *m, const char *name, double value)
+{
+    PyObject *obj = PyFloat_FromDouble(value);
+    if (obj == NULL) {
+        return -1;
+    }
+#if defined(Py_GIL_DISABLED) && PY_VERSION_HEX >= 0x030e0000
+    PyUnstable_SetImmortal(obj);
+#endif
+    int res = PyModule_AddObjectRef(m, name, obj);
+    Py_DECREF(obj);
+    return res;
+}
+
 int initumath(PyObject *m)
 {
     PyObject *d, *s, *s2;
@@ -207,12 +224,11 @@ int initumath(PyObject *m)
 #endif
 
     /* Add some symbolic constants to the module */
-    PyDict_SetItemString(d, "pi", s = PyFloat_FromDouble(NPY_PI));
-    Py_DECREF(s);
-    PyDict_SetItemString(d, "e", s = PyFloat_FromDouble(NPY_E));
-    Py_DECREF(s);
-    PyDict_SetItemString(d, "euler_gamma", s = PyFloat_FromDouble(NPY_EULER));
-    Py_DECREF(s);
+    if (add_float_constant(m, "pi", NPY_PI) < 0
+            || add_float_constant(m, "e", NPY_E) < 0
+            || add_float_constant(m, "euler_gamma", NPY_EULER) < 0) {
+        return -1;
+    }
 
 #define ADDCONST(str) PyModule_AddIntConstant(m, #str, UFUNC_##str)
 #define ADDSCONST(str) PyModule_AddStringConstant(m, "UFUNC_" #str, UFUNC_##str)
@@ -233,11 +249,13 @@ int initumath(PyObject *m)
     Py_INCREF(npy_static_pydata.npy_extobj_contextvar);
     PyModule_AddObject(m, "_extobj_contextvar", npy_static_pydata.npy_extobj_contextvar);
 
-    PyModule_AddObject(m, "PINF", PyFloat_FromDouble(NPY_INFINITY));
-    PyModule_AddObject(m, "NINF", PyFloat_FromDouble(-NPY_INFINITY));
-    PyModule_AddObject(m, "PZERO", PyFloat_FromDouble(NPY_PZERO));
-    PyModule_AddObject(m, "NZERO", PyFloat_FromDouble(NPY_NZERO));
-    PyModule_AddObject(m, "NAN", PyFloat_FromDouble(NPY_NAN));
+    if (add_float_constant(m, "PINF", NPY_INFINITY) < 0
+            || add_float_constant(m, "NINF", -NPY_INFINITY) < 0
+            || add_float_constant(m, "PZERO", NPY_PZERO) < 0
+            || add_float_constant(m, "NZERO", NPY_NZERO) < 0
+            || add_float_constant(m, "NAN", NPY_NAN) < 0) {
+        return -1;
+    }
 
     s = PyDict_GetItemString(d, "divide"); // noqa: borrowed-ref OK
     PyDict_SetItemString(d, "true_divide", s);
