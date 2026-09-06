@@ -174,8 +174,7 @@ ufunc_frompyfunc(PyObject *NPY_UNUSED(dummy), PyObject *args, PyObject *kwds) {
 
 /* Setup the umath part of the module */
 
-/* Add a float constant; immortal on free-threaded builds to avoid
- * refcount contention when threads read e.g. ``np.pi``. */
+/* Add a float constant; immortal on free-threaded builds */
 static int
 add_float_constant(PyObject *m, const char *name, double value)
 {
