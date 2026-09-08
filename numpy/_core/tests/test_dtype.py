@@ -1654,6 +1654,35 @@ class TestFromDTypeAttribute:
         with pytest.raises(ValueError):
             np.dtype(vdt(1))
 
+    def test_get_error_propagates(self):
+        # gh-27120: a non-dtype ``.dtype`` attribute is checked for being a
+        # class property; an error raised by that check must not be ignored.
+        class RaisingGet:
+            def __getattr__(self, name):
+                if name == "__get__":
+                    raise RuntimeError("boom")
+                raise AttributeError(name)
+
+        class dt:
+            dtype = RaisingGet()
+
+        with pytest.raises(RuntimeError, match="boom"):
+            np.dtype(dt)
+
+    def test_void_subtype_get_error_propagates(self):
+        # gh-27120, as above but for the np.void subclass code path
+        class RaisingGet:
+            def __getattr__(self, name):
+                if name == "__get__":
+                    raise RuntimeError("boom")
+                raise AttributeError(name)
+
+        class vdt(np.void):
+            dtype = RaisingGet()
+
+        with pytest.raises(RuntimeError, match="boom"):
+            np.dtype(vdt)
+
 
 class TestFromDTypeProtocol:
     def test_simple(self):

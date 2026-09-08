@@ -520,6 +520,36 @@ class TestDateTime:
         actual = np.array(inputs, dtype='timedelta64[D]')
         assert_equal(expected, actual)
 
+    def test_timedelta_duck_typing(self):
+        # Objects exposing days/seconds/microseconds are accepted
+        class DuckTimedelta:
+            days = 1
+            seconds = 2
+            microseconds = 3
+
+        assert_equal(np.timedelta64(DuckTimedelta()),
+                     np.timedelta64(datetime.timedelta(1, 2, 3)))
+
+        # ... but only if all three attributes are present
+        class PartialTimedelta:
+            days = 1
+
+        assert_raises(ValueError, np.timedelta64, PartialTimedelta())
+
+    @pytest.mark.parametrize("attr", ["days", "seconds", "microseconds"])
+    def test_timedelta_duck_typing_error_propagates(self, attr):
+        # gh-27120: an error raised while looking up one of the attributes
+        # must not be silently ignored.
+        class Raising:
+            days = seconds = microseconds = 0
+
+            def __getattribute__(self, name):
+                if name == attr:
+                    raise RuntimeError("boom")
+                return super().__getattribute__(name)
+
+        assert_raises(RuntimeError, np.timedelta64, Raising())
+
     def test_timedelta_0_dim_object_array_conversion(self):
         # Regression test for gh-11151
         test = np.array(datetime.timedelta(seconds=20))

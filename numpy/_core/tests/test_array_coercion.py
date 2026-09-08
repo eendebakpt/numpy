@@ -784,6 +784,23 @@ class TestArrayLikes:
 
         assert_array_equal(np.asarray(MyClass), arr)
 
+    @pytest.mark.parametrize("attr",
+            ["__array_interface__", "__array_struct__", "__array__"])
+    def test_class_attr_get_error_propagates(self, attr):
+        # gh-27120: when the special attribute is looked up on a class, NumPy
+        # checks whether the result is a descriptor (i.e. a class property).
+        # An error raised by that check must not be silently ignored.
+        class RaisingGet:
+            def __getattr__(self, name):
+                if name == "__get__":
+                    raise RuntimeError("boom")
+                raise AttributeError(name)
+
+        MyClass = type("MyClass", (), {attr: RaisingGet()})
+
+        with pytest.raises(RuntimeError, match="boom"):
+            np.array(MyClass)
+
 
 class TestAsArray:
     """Test expected behaviors of ``asarray``."""

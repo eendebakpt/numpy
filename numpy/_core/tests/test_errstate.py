@@ -64,6 +64,24 @@ class TestErrstate:
 
         assert count == 1
 
+    def test_errcall_write_attribute_error_propagates(self):
+        # gh-27120: a failing ``write`` lookup must not be masked
+        class RaisingWrite:
+            @property
+            def write(self):
+                raise RuntimeError("boom")
+
+        with assert_raises(RuntimeError):
+            with np.errstate(call=RaisingWrite()):
+                pass
+
+        class NoWrite:
+            pass
+
+        with assert_raises(TypeError):
+            with np.errstate(call=NoWrite()):
+                pass
+
     def test_errstate_decorator(self):
         @np.errstate(all='ignore')
         def foo():
