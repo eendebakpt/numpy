@@ -1,0 +1,17 @@
+Errors during some attribute lookups are no longer ignored
+----------------------------------------------------------
+A few internal attribute lookups used ``PyObject_HasAttrString``, which
+silently discards *any* exception raised while looking the attribute up.
+These now propagate the error instead:
+
+* Converting an object to a ``timedelta64`` reads its ``days``, ``seconds``
+  and ``microseconds`` attributes.  An error raised by one of them is no
+  longer swallowed (the object is still rejected as before if an attribute
+  is simply missing).
+* When a class (rather than an instance) defines ``__array_interface__``,
+  ``__array_struct__``, ``__array__`` or ``dtype``, NumPy checks whether the
+  value is a class property by looking up ``__get__`` on it.  An error raised
+  by that lookup is no longer swallowed.
+* `numpy.errstate` validates a non-callable ``call`` argument by looking up
+  its ``write`` attribute; an error raised there is no longer replaced by a
+  ``TypeError``.
