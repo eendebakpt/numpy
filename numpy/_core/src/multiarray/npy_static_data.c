@@ -94,6 +94,11 @@ intern_strings(void)
     INTERN_STRING(total_seconds, "total_seconds");
     INTERN_STRING(reduce, "reduce");
     INTERN_STRING(accumulate, "accumulate");
+    INTERN_STRING(days, "days");
+    INTERN_STRING(seconds, "seconds");
+    INTERN_STRING(microseconds, "microseconds");
+    INTERN_STRING(write, "write");
+    INTERN_STRING(__get__, "__get__");
     return 0;
 }
 

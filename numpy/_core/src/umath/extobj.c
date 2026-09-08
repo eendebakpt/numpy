@@ -251,7 +251,10 @@ extobj_make_extobj(PyObject *NPY_UNUSED(mod),
     /* Validate func (probably): None, callable, or callable write attribute */
     if (pyfunc != NULL && pyfunc != Py_None && !PyCallable_Check(pyfunc)) {
         PyObject *temp;
-        temp = PyObject_GetAttrString(pyfunc, "write");
+        if (PyObject_GetOptionalAttr(
+                pyfunc, _npy_module_state->interned_str.write, &temp) < 0) {
+            return NULL;
+        }
         if (temp == NULL || !PyCallable_Check(temp)) {
             PyErr_SetString(PyExc_TypeError,
                             "python object must be callable or have "

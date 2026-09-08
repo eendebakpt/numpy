@@ -118,7 +118,16 @@ _try_convert_from_dtype_attr(PyObject *obj)
         }
     }
     if (!PyArray_DescrCheck(attr)) {
-        if (PyType_Check(obj) && PyObject_HasAttrString(attr, "__get__")) {
+        int is_descriptor = 0;
+        if (PyType_Check(obj)) {
+            is_descriptor = PyObject_HasAttrWithError(
+                    attr, interned_str->__get__);
+            if (is_descriptor < 0) {
+                Py_DECREF(attr);
+                return NULL;
+            }
+        }
+        if (is_descriptor) {
             /* If the object has a __get__, assume this is a class property. */
             Py_DECREF(attr);
             Py_INCREF(Py_NotImplemented);

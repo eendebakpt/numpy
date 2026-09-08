@@ -75,6 +75,11 @@ typedef struct npy_interned_str_struct {
     PyObject *total_seconds;
     PyObject *reduce;
     PyObject *accumulate;
+    PyObject *days;
+    PyObject *seconds;
+    PyObject *microseconds;
+    PyObject *write;
+    PyObject *__get__;
 } npy_interned_str_struct;
 
 /*

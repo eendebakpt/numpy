@@ -2020,7 +2020,16 @@ PyArray_FromStructInterface(PyObject *input)
         return Py_NotImplemented;
     }
     if (!PyCapsule_CheckExact(attr)) {
-        if (PyType_Check(input) && PyObject_HasAttrString(attr, "__get__")) {
+        int is_descriptor = 0;
+        if (PyType_Check(input)) {
+            is_descriptor = PyObject_HasAttrWithError(
+                    attr, _npy_module_state->interned_str.__get__);
+            if (is_descriptor < 0) {
+                Py_DECREF(attr);
+                return NULL;
+            }
+        }
+        if (is_descriptor) {
             /*
              * If the input is a class `attr` should be a property-like object.
              * This cannot be interpreted as an array, but is a valid.
@@ -2144,7 +2153,16 @@ PyArray_FromInterface(PyObject *origin)
         return Py_NotImplemented;
     }
     if (!PyDict_Check(iface)) {
-        if (PyType_Check(origin) && PyObject_HasAttrString(iface, "__get__")) {
+        int is_descriptor = 0;
+        if (PyType_Check(origin)) {
+            is_descriptor = PyObject_HasAttrWithError(
+                    iface, _npy_module_state->interned_str.__get__);
+            if (is_descriptor < 0) {
+                Py_DECREF(iface);
+                return NULL;
+            }
+        }
+        if (is_descriptor) {
             /*
              * If the input is a class `iface` should be a property-like object.
              * This cannot be interpreted as an array, but is a valid.
@@ -2523,15 +2541,24 @@ PyArray_FromArrayAttr_int(PyObject *op, PyArray_Descr *descr, int copy,
         return Py_NotImplemented;
     }
 
-    if (PyType_Check(op) && PyObject_HasAttrString(array_meth, "__get__")) {
-        /*
-         * If the input is a class `array_meth` may be a property-like object.
-         * This cannot be interpreted as an array (called), but is a valid.
-         * Trying `array_meth.__call__()` on this should not be useful.
-         * (Needed due to the lookup being on the instance rather than type)
-         */
-        Py_DECREF(array_meth);
-        return Py_NotImplemented;
+    if (PyType_Check(op)) {
+        int is_descriptor = PyObject_HasAttrWithError(
+                array_meth, state->interned_str.__get__);
+        if (is_descriptor < 0) {
+            Py_DECREF(array_meth);
+            return NULL;
+        }
+        if (is_descriptor) {
+            /*
+             * If the input is a class `array_meth` may be a property-like
+             * object.  This cannot be interpreted as an array (called), but
+             * is a valid.  Trying `array_meth.__call__()` on this should not
+             * be useful.  (Needed due to the lookup being on the instance
+             * rather than type)
+             */
+            Py_DECREF(array_meth);
+            return Py_NotImplemented;
+        }
     }
 
     Py_ssize_t nargs = 0;

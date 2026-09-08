@@ -398,7 +398,7 @@ __New_PyArray_Std(PyArrayObject *self, int axis, int rtype, PyArrayObject *out,
         return NULL;
     }
     if (PyArray_ISCOMPLEX(arr2)) {
-        obj3 = PyObject_GetAttrString((PyObject *)arr2, "real");
+        obj3 = PyObject_GetAttr((PyObject *)arr2, state->interned_str.real);
         switch(rtype) {
         case NPY_CDOUBLE:
             rtype = NPY_DOUBLE;
@@ -589,7 +589,7 @@ PyArray_Round(PyArrayObject *a, int decimals, PyArrayObject *out)
         }
 
         /* arr.real = a.real.round(decimals) */
-        part = PyObject_GetAttrString((PyObject *)a, "real");
+        part = PyObject_GetAttr((PyObject *)a, state->interned_str.real);
         if (part == NULL) {
             Py_DECREF(arr);
             return NULL;
@@ -602,7 +602,7 @@ PyArray_Round(PyArrayObject *a, int decimals, PyArrayObject *out)
             Py_DECREF(arr);
             return NULL;
         }
-        res = PyObject_SetAttrString(arr, "real", round_part);
+        res = PyObject_SetAttr(arr, state->interned_str.real, round_part);
         Py_DECREF(round_part);
         if (res < 0) {
             Py_DECREF(arr);
@@ -610,7 +610,7 @@ PyArray_Round(PyArrayObject *a, int decimals, PyArrayObject *out)
         }
 
         /* arr.imag = a.imag.round(decimals) */
-        part = PyObject_GetAttrString((PyObject *)a, "imag");
+        part = PyObject_GetAttr((PyObject *)a, state->interned_str.imag);
         if (part == NULL) {
             Py_DECREF(arr);
             return NULL;
@@ -623,7 +623,7 @@ PyArray_Round(PyArrayObject *a, int decimals, PyArrayObject *out)
             Py_DECREF(arr);
             return NULL;
         }
-        res = PyObject_SetAttrString(arr, "imag", round_part);
+        res = PyObject_SetAttr(arr, state->interned_str.imag, round_part);
         Py_DECREF(round_part);
         if (res < 0) {
             Py_DECREF(arr);

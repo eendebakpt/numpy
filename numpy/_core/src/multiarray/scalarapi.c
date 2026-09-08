@@ -351,7 +351,13 @@ PyArray_DescrFromTypeObject(PyObject *type)
         }
         if (res == 1) {
             if (!PyArray_DescrCheck(attr)) {
-                if (PyObject_HasAttrString(attr, "__get__")) {
+                int is_descriptor = PyObject_HasAttrWithError(
+                        attr, _npy_module_state->interned_str.__get__);
+                if (is_descriptor < 0) {
+                    Py_DECREF(attr);
+                    return NULL;
+                }
+                if (is_descriptor) {
                     /* If the object has a __get__, assume this is a class property. */
                     Py_DECREF(attr);
                     conv = NULL;

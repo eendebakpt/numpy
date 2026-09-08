@@ -72,7 +72,12 @@ extern "C" {
     F(utcoffset)            \
     F(total_seconds)        \
     F(reduce)               \
-    F(accumulate)
+    F(accumulate)           \
+    F(days)                 \
+    F(seconds)              \
+    F(microseconds)         \
+    F(write)                \
+    F(__get__)
 
 #define NPY_STATIC_PYDATA_FIELDS(F) \
     F(default_truediv_type_tup)    \
