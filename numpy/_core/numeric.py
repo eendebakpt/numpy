@@ -2430,8 +2430,16 @@ def isclose(a, b, rtol=1.e-5, atol=1.e-8, equal_nan=False):
     elif isinstance(y, int):
         y = float(y)
 
-    # atol and rtol can be arrays
-    if not (np.all(np.isfinite(atol)) and np.all(np.isfinite(rtol))):
+    # atol and rtol can be arrays, but are plain floats by default.  The
+    # generic check below is expensive enough to dominate small `isclose`
+    # calls, so use `math.isfinite` when it applies.
+    if type(atol) is float and type(rtol) is float:
+        tolerances_are_finite = math.isfinite(atol) and math.isfinite(rtol)
+    else:
+        tolerances_are_finite = (np.all(np.isfinite(atol))
+                                 and np.all(np.isfinite(rtol)))
+
+    if not tolerances_are_finite:
         err_s = np.geterr()["invalid"]
         err_msg = f"One of rtol or atol is not valid, atol: {atol}, rtol: {rtol}"
 
