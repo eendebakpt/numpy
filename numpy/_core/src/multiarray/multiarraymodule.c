@@ -2378,6 +2378,86 @@ array_fromstring(PyObject *NPY_UNUSED(ignored), PyObject *args, PyObject *keywds
 
 
 
+/*
+ * Read `num` binary elements from `file` using its `readinto` method.
+ *
+ * Reading through the Python file object preserves its buffering.  The
+ * `FILE*` path below has to flush, dup the file descriptor and set up a new
+ * stdio stream on every call, which dominates the run time when a file is
+ * read in small pieces (gh-13319).
+ *
+ * Returns NULL without an exception set when the fast path does not apply.
+ */
+static PyObject *
+fromfile_readinto(PyObject *file, PyArray_Descr *type, npy_intp num)
+{
+    if (type->elsize <= 0 || PyDataType_REFCHK(type)
+            || PyDataType_HASSUBARRAY(type)) {
+        return NULL;
+    }
+    /* As for the `FILE*` path, only objects backed by a real file qualify */
+    PyObject *readinto = PyObject_GetAttrString(file, "readinto");
+    if (readinto == NULL || PyObject_AsFileDescriptor(file) < 0) {
+        Py_XDECREF(readinto);
+        PyErr_Clear();
+        return NULL;
+    }
+
+    Py_INCREF(type);  /* do not steal the original dtype. */
+    PyArrayObject *r = (PyArrayObject *)PyArray_NewFromDescr(
+            &PyArray_Type, type, 1, &num, NULL, NULL, 0, NULL);
+    if (r == NULL) {
+        Py_DECREF(readinto);
+        return NULL;
+    }
+
+    npy_intp nbytes = PyArray_NBYTES(r), nread = 0;
+    while (nread < nbytes) {
+        PyObject *buf = PyMemoryView_FromMemory(
+                PyArray_BYTES(r) + nread, nbytes - nread, PyBUF_WRITE);
+        if (buf == NULL) {
+            goto fail;
+        }
+        PyObject *res = PyObject_CallOneArg(readinto, buf);
+        /* Invalidate the view; it borrows memory that we may reallocate */
+        Py_XDECREF(PyObject_CallMethod(buf, "release", NULL));
+        Py_DECREF(buf);
+        if (res == NULL) {
+            goto fail;
+        }
+        /* `None` is returned by non-blocking streams that have no data */
+        npy_intp n = res == Py_None ? 0 : PyLong_AsSsize_t(res);
+        Py_DECREF(res);
+        if (n <= 0) {
+            if (PyErr_Occurred()) {
+                goto fail;
+            }
+            break;  /* end of file */
+        }
+        nread += n;
+    }
+    Py_DECREF(readinto);
+
+    if (nread < nbytes) {
+        /* Shrink to the number of elements that could be read */
+        npy_intp nelem = nread / type->elsize;
+        PyArray_Dims newshape = {&nelem, 1};
+        PyObject *res = PyArray_Resize(r, &newshape, 0, NPY_CORDER);
+        if (res == NULL) {
+            Py_DECREF(r);
+            return NULL;
+        }
+        Py_DECREF(res);
+    }
+    return (PyObject *)r;
+
+  fail:
+    Py_DECREF(readinto);
+    Py_DECREF(r);
+    return NULL;
+}
+
+
 static PyObject *
 array_fromfile(PyObject *NPY_UNUSED(ignored), PyObject *args, PyObject *keywds)
 {
@@ -2430,6 +2510,17 @@ array_fromfile(PyObject *NPY_UNUSED(ignored), PyObject *args, PyObject *keywds)
     }
     else {
         own = 0;
+    }
+    if (!own && nin >= 0 && offset == 0 && (sep == NULL || sep[0] == 0)) {
+        if (type == NULL) {
+            type = PyArray_DescrFromType(NPY_DEFAULT_TYPE);
+        }
+        ret = fromfile_readinto(file, type, (npy_intp)nin);
+        if (ret != NULL || PyErr_Occurred()) {
+            Py_DECREF(type);
+            Py_DECREF(file);
+            return ret;
+        }
     }
     fp = npy_PyFile_Dup2(file, "rb", &orig_pos);
     if (fp == NULL) {
