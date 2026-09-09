@@ -136,6 +136,77 @@ class TestIsInteger:
             assert not value.is_integer()
 
 
+class TestAsType:
+    # gh-29455: an identity cast with copy=False used to build a new scalar
+    @pytest.mark.parametrize("scalar", [
+        np.bool_(True), np.int8(3), np.int64(3), np.uint8(2), np.uint64(2),
+        np.float16(1.5), np.float64(1.1), np.longdouble(1.5),
+        np.complex64(1 + 2j), np.complex128(1 + 2j),
+    ])
+    def test_identity_cast_returns_self(self, scalar):
+        # these scalars are immutable, so copy=True may return self as well
+        assert scalar.astype(scalar.dtype, copy=False) is scalar
+        assert scalar.astype(scalar.dtype, copy=True) is scalar
+        assert scalar.astype(scalar.dtype) is scalar
+        assert scalar.astype(type(scalar)) is scalar
+        assert np.astype(scalar, scalar.dtype, copy=False) is scalar
+
+    @pytest.mark.parametrize("scalar", [
+        np.str_("ab"), np.bytes_(b"ab"), np.datetime64("2020-01-01", "D"),
+        np.timedelta64(5, "s"),
+    ])
+    def test_parametric_dtypes_are_not_shortcut(self, scalar):
+        # their descrs are not singletons, so they take the ndarray.astype path
+        result = scalar.astype(scalar.dtype, copy=False)
+        assert result == scalar
+        assert result.dtype == scalar.dtype
+
+    def test_non_bool_copy_is_validated(self):
+        # anything but a plain bool falls through to ndarray.astype
+        scalar = np.float64(1.1)
+        assert scalar.astype(np.float64, copy=np.True_) == scalar
+        with pytest.raises(ValueError):
+            scalar.astype(np.float64, copy=np._CopyMode.ALWAYS)
+
+    def test_different_dtype_still_casts(self):
+        scalar = np.float64(1.5)
+        assert scalar.astype(np.int64, copy=False) == 1
+
+    def test_subclass_is_not_shortcut(self):
+        # a subclass instance must never be handed back: it is not the
+        # requested type and, unlike a plain scalar, it can carry attributes
+        class MyFloat(np.float64):
+            pass
+
+        scalar = MyFloat(1.5)
+        scalar.tag = "keepme"
+        for result in [scalar.astype(np.float64),
+                       scalar.astype(np.float64, copy=False),
+                       scalar.astype(np.float64, copy=True),
+                       scalar.astype(scalar.dtype, copy=False),
+                       scalar.astype(MyFloat)]:
+            assert result is not scalar
+            assert type(result) is np.float64
+            assert not hasattr(result, "tag")
+            assert result == scalar
+
+    def test_void_is_not_shortcut(self):
+        # np.void is mutable and may view a parent array
+        arr = np.array([("AB",), ("CD",)], dtype=[("name", "U5")])
+        scalar = arr[1]
+        assert scalar.astype(scalar.dtype, copy=False) is not scalar
+        copied = scalar.astype(scalar.dtype, copy=True)
+        copied["name"] = "ZZ"
+        assert arr[1]["name"] == "CD"
+
+    def test_casting_is_still_checked(self):
+        # the shortcut must not swallow the casting= argument
+        with pytest.raises(TypeError):
+            np.float64(1.5).astype(np.int64, casting="safe")
+        with pytest.raises(TypeError):
+            np.bool_(True).astype(np.float64, casting="no")
+
+
 class TestClassGetItem:
     @pytest.mark.parametrize("cls", [
         np.number,

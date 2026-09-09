@@ -2262,6 +2262,60 @@ gentype_byteswap(PyObject *self, PyObject *args, PyObject *kwds)
 
 
 /*
+ * gh-29455: every scalar except `np.void` is immutable, so an identity cast
+ * can hand back the scalar itself whatever `copy` asks for.
+ */
+static PyObject *
+gentype_astype(PyObject *self, PyObject *const *args, Py_ssize_t len_args,
+        PyObject *kwnames)
+{
+    /* only `astype(dtype[, copy=bool])`; anything else uses ndarray.astype */
+    if (len_args == 1 && !PyArray_IsScalar(self, Void)
+            && (kwnames == NULL
+                || (PyTuple_GET_SIZE(kwnames) == 1
+                    && (args[1] == Py_True || args[1] == Py_False)
+                    && PyUnicode_CompareWithASCIIString(
+                            PyTuple_GET_ITEM(kwnames, 0), "copy") == 0))) {
+        PyArray_Descr *to;
+        if (PyArray_DescrConverter(args[0], &to) == NPY_SUCCEED) {
+            /* only singleton descrs match by identity, so U/S/M8/m8 fall through */
+            PyArray_Descr *from = PyArray_DescrFromScalar(self);
+            if (from == NULL) {
+                Py_DECREF(to);
+                return NULL;
+            }
+            int identity = from == to
+                    && Py_TYPE(self) == (PyTypeObject *)to->typeobj;
+            Py_DECREF(from);
+            Py_DECREF(to);
+            if (identity) {
+                return Py_NewRef(self);
+            }
+        }
+        else {
+            PyErr_Clear();  /* let ndarray.astype report it */
+        }
+    }
+
+    PyObject *arr = PyArray_FromScalar(self, NULL);
+    if (arr == NULL) {
+        return NULL;
+    }
+    PyObject *meth = PyObject_GetAttrString(arr, "astype");
+    Py_DECREF(arr);
+    if (meth == NULL) {
+        return NULL;
+    }
+    PyObject *ret = PyObject_Vectorcall(meth, args, len_args, kwnames);
+    Py_DECREF(meth);
+    if (ret != NULL && PyArray_Check(ret)) {
+        return PyArray_Return((PyArrayObject *)ret);
+    }
+    return ret;
+}
+
+
+/*
  * These gentype_* functions take keyword arguments.
  * The proper flag is METH_VARARGS | METH_KEYWORDS.
  */
@@ -2269,7 +2323,7 @@ gentype_byteswap(PyObject *self, PyObject *args, PyObject *kwds)
  *
  * #name = take, getfield, put, repeat, tofile, mean, trace, diagonal, clip,
  *         std, var, sum, cumsum, prod, cumprod, compress, sort, argsort,
- *         round, argmax, argmin, max, min, any, all, astype, resize,
+ *         round, argmax, argmin, max, min, any, all, resize,
  *         reshape, choose, tobytes, copy, searchsorted, view,
  *         flatten, ravel, squeeze#
  */
@@ -2740,7 +2794,7 @@ static PyMethodDef gentype_methods[] = {
         METH_VARARGS | METH_KEYWORDS, NULL},
     {"astype",
         (PyCFunction)gentype_astype,
-        METH_VARARGS | METH_KEYWORDS, NULL},
+        METH_FASTCALL | METH_KEYWORDS, NULL},
     {"getfield",
         (PyCFunction)gentype_getfield,
         METH_VARARGS | METH_KEYWORDS, NULL},
