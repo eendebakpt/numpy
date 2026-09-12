@@ -1,0 +1,5 @@
+Faster ``astype`` of float64 and int64 scalars to their own dtype
+-----------------------------------------------------------------
+``np.float64`` and ``np.int64`` scalars are immutable, so
+``scalar.astype(scalar.dtype)`` now returns the scalar itself instead of
+creating a new one.

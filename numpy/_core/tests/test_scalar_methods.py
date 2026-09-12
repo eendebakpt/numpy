@@ -136,6 +136,48 @@ class TestIsInteger:
             assert not value.is_integer()
 
 
+class TestAsType:
+    # gh-29455: float64 and int64 scalars are immutable, so an identity astype
+    # returns the scalar itself
+    @pytest.mark.parametrize("scalar", [np.float64(1.5), np.int64(3)])
+    def test_identity_returns_self(self, scalar):
+        assert scalar.astype(scalar.dtype) is scalar
+        assert scalar.astype(type(scalar)) is scalar
+        assert scalar.astype(scalar.dtype.name) is scalar
+        assert scalar.astype(type(scalar.dtype)) is scalar
+
+    @pytest.mark.parametrize("scalar", [np.float64(1.5), np.int64(3)])
+    def test_explicit_copy(self, scalar):
+        for copy in [True, False]:
+            result = scalar.astype(scalar.dtype, copy=copy)
+            assert type(result) is type(scalar)
+            assert result == scalar
+
+    def test_other_dtypes(self):
+        assert_equal(np.float64(1.5).astype(np.int64), np.int64(1))
+        assert_equal(np.int64(3).astype(np.float64), np.float64(3.0))
+        swapped = np.float64(1.5).astype(np.dtype(np.float64).newbyteorder())
+        assert type(swapped) is np.float64
+        assert swapped == 1.5
+
+    def test_subclass_is_not_returned(self):
+        class MyFloat(np.float64):
+            pass
+
+        scalar = MyFloat(1.5)
+        result = scalar.astype(np.float64)
+        assert type(result) is np.float64
+        assert result == scalar
+
+    def test_invalid_dtype(self):
+        with pytest.raises(TypeError):
+            np.float64(1.5).astype("not a dtype")
+
+    def test_casting_is_still_checked(self):
+        with pytest.raises(TypeError):
+            np.float64(1.5).astype(np.int64, casting="safe")
+
+
 class TestClassGetItem:
     @pytest.mark.parametrize("cls", [
         np.number,

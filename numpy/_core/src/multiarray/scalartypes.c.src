@@ -2284,6 +2284,38 @@ gentype_byteswap(PyObject *self, PyObject *args, PyObject *kwds)
 
 
 /*
+ * gh-29455: float64 and int64 scalars are immutable, so `astype` to their own
+ * type can return the scalar itself.  Only the common `astype(dtype)` spelling
+ * is handled; everything else (including an explicit `copy`) goes through
+ * ndarray.astype.
+ */
+static PyObject *
+gentype_astype(PyObject *self, PyObject *const *args, Py_ssize_t len_args,
+        PyObject *kwnames)
+{
+    if (len_args == 1 && kwnames == NULL
+            && (Py_IS_TYPE(self, &PyDoubleArrType_Type)
+                || Py_IS_TYPE(self, &PyInt64ArrType_Type))) {
+        /* same converter as ndarray.astype, so the accepted dtypes match */
+        npy_dtype_info dt_info;
+        if (PyArray_DTypeOrDescrConverterRequired(args[0], &dt_info) != NPY_SUCCEED) {
+            return NULL;
+        }
+        /* a DType class (no descr) means the default, native instance */
+        int same = dt_info.dtype->scalar_type == Py_TYPE(self)
+                   && (dt_info.descr == NULL
+                       || PyArray_ISNBO(dt_info.descr->byteorder));
+        Py_XDECREF(dt_info.descr);
+        Py_DECREF(dt_info.dtype);
+        if (same) {
+            return Py_NewRef(self);
+        }
+    }
+    return gentype_generic_vectorcall(self, args, len_args, kwnames, "astype");
+}
+
+
+/*
  * These gentype_* functions take keyword arguments.
  * The proper flag is METH_FASTCALL | METH_KEYWORDS.
  */
@@ -2291,7 +2323,7 @@ gentype_byteswap(PyObject *self, PyObject *args, PyObject *kwds)
  *
  * #name = take, getfield, put, repeat, tofile, mean, trace, diagonal, clip,
  *         std, var, sum, cumsum, prod, cumprod, compress, sort, argsort,
- *         round, argmax, argmin, max, min, any, all, astype, resize,
+ *         round, argmax, argmin, max, min, any, all, resize,
  *         reshape, choose, tobytes, copy, searchsorted, view,
  *         flatten, ravel, squeeze#
  */
