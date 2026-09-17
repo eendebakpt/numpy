@@ -6960,28 +6960,24 @@ add_newdoc('numpy._core.numerictypes', 'generic', ('__dlpack_device__',
 # Methods
 
 add_newdoc('numpy._core.numerictypes', 'generic', ('astype',
-"""
+    """
     astype(dtype, order='K', casting='unsafe', subok=True, copy=True)
     --
 
-    Scalar method identical to `ndarray.astype`. Avoids copy for
-    immutables when `dtype` is equivalent to the data type of the
-    object regardless of the value of `copy`.
+    Scalar method identical to `ndarray.astype`.  As NumPy scalars other
+    than `numpy.void` are immutable, the scalar itself may be returned when
+    ``dtype`` matches its own data type, unless ``copy=True`` is passed
+    explicitly.
 
     Examples
     --------
     >>> import numpy as np
     >>> x = np.float64(3.14)
-    >>> x
-    np.float64(3.14)
-
-    >>> id(x)
-    139894205215600
-
-    >>> y = x.astype('float64', copy=True)
-    >>> id(y)
-    139894205215600
-"""))
+    >>> x.astype(np.int64)
+    np.int64(3)
+    >>> x.astype(np.float64, copy=False) is x
+    True
+    """))
 
 add_newdoc('numpy._core.numerictypes', 'number', ('__class_getitem__',
     """

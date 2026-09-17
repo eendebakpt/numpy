@@ -136,35 +136,70 @@ class TestIsInteger:
             assert not value.is_integer()
 
 class TestAsType:
-    def test_copy(self) -> None:
-        a = np.float64(4.5)
-        b = a.astype(np.float64, copy=False)
-        assert a is b
-        b = np.astype(a, np.int64, copy=False)
-        assert a != b
-        b = a.astype(np.float64, copy=True)
-        assert a is b
+    # gh-29455
+    identity_scalars = [np.bool_(True), np.int8(-5), np.uint16(7), np.int64(3),
+                        np.float16(1.5), np.float64(1.5), np.longdouble(1.5),
+                        np.complex128(1 + 2j)]
 
-class TestAsTypeStructuredCopy:
-    # Regression test for gh-32379: astype on a structured scalar
-    # must return an independent object, not a mutable view into the parent array.
-    def test_copy_true_is_independent(self) -> None:
-        a = np.array([('AB',), ('CD',)], dtype=[('name', 'U5')])
-        b = a[1]
+    @pytest.mark.parametrize("scalar", identity_scalars)
+    def test_identity_returns_self(self, scalar):
+        for dtype in [scalar.dtype, type(scalar), type(scalar.dtype),
+                      scalar.dtype.char]:
+            assert scalar.astype(dtype) is scalar
+            assert scalar.astype(dtype, copy=False) is scalar
+        assert np.astype(scalar, scalar.dtype, copy=False) is scalar
 
-        c = b.astype(b, copy=True)
-        assert c is not b
-        c['name'] = 'ZZ'
-        assert a[1]['name'] == 'CD'
+    @pytest.mark.parametrize("scalar", identity_scalars[1:])  # np.True_ is a singleton
+    def test_copy_true_still_copies(self, scalar):
+        result = scalar.astype(scalar.dtype, copy=True)
+        assert result is not scalar
+        assert type(result) is type(scalar)
+        assert result == scalar
 
-    def test_default_copy_is_independent(self) -> None:
-        # copy defaults to True, so the same guarantee holds without the kwarg
-        a = np.array([('AB',), ('CD',)], dtype=[('name', 'U5')])
-        b = a[1]
+    @pytest.mark.parametrize("scalar", [
+        np.str_("ab"), np.bytes_(b"ab"), np.datetime64("2020-01-02"),
+        np.timedelta64(5, "s")])
+    def test_parametric_dtypes_use_array_path(self, scalar):
+        result = scalar.astype(scalar.dtype, copy=False)
+        assert result is not scalar
+        assert type(result) is type(scalar)
+        assert result == scalar
+        with pytest.raises(TypeError, match="Cannot cast scalar"):
+            scalar.astype(scalar.dtype, casting="same_value")
 
-        c = b.astype(b)
-        c['name'] = 'ZZ'
-        assert a[1]['name'] == 'CD'
+    def test_void_is_never_returned(self):
+        a = np.array([("AB", 1)], dtype=[("n", "U5"), ("v", "i4")])
+        v = a[0]
+        assert v.astype(v.dtype, copy=False) is not v
+        result = v.astype(v.dtype)
+        assert result is not v
+        result["v"] = 99
+        assert a[0]["v"] == 1
+
+    def test_longdouble_is_not_float64(self):
+        assert type(np.float64(1.5).astype(np.longdouble)) is np.longdouble
+        assert type(np.longdouble(1.5).astype(np.float64)) is np.float64
+
+    def test_subarray_dtype(self):
+        x = np.array(([1, 2],), dtype=[("f", "i4", (2,))])[()]
+        assert_equal(x.astype(np.dtype(("i4", (2,)))), [1, 2])
+        with pytest.raises(TypeError):
+            np.int64(128).astype(("i1", (2,)), casting="same_value")
+
+    def test_other_arguments_still_checked(self):
+        class MyFloat(np.float64):
+            pass
+
+        assert type(MyFloat(1.5).astype(np.float64, copy=False)) is np.float64
+        with pytest.raises(TypeError, match="Cannot cast scalar"):
+            np.float64(1.5).astype(np.int64, casting="safe")
+        with pytest.raises(TypeError):
+            np.float64(1.5).astype(np.float64, bogus=3)
+        with pytest.raises(TypeError):
+            np.float64(1.5).astype("not a dtype")
+        swapped = np.float64(1.5).astype(np.dtype(np.float64).newbyteorder())
+        assert type(swapped) is np.float64 and swapped == 1.5
+
 
 class TestClassGetItem:
     @pytest.mark.parametrize("cls", [
