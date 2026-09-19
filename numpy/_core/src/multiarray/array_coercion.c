@@ -107,6 +107,22 @@ enum _dtype_discovery_flags {
 };
 
 
+/*
+ * One-entry cache for the pytype to DType lookup, so that the lookup is not
+ * repeated for each element of a homogeneous sequence.  It lives on the stack
+ * of the coercion call (one per sequence being iterated), so it needs no
+ * locking.  Only types found in the builtin scalar table or in the
+ * pytype-to-DType mapping are stored: those entries are never removed or
+ * changed and the mapping keeps the type alive, so both pointers stay valid
+ * (and borrowed).  Unknown types must not be cached, as they may be freed
+ * (and the address reused) or registered while the coercion runs.
+ */
+typedef struct {
+    PyTypeObject *pytype;
+    PyArray_DTypeMeta *DType;  /* a DType or Py_None (known sequence type) */
+} npy_pytype_cache;
+
+
 /**
  * Adds known sequence types to the global type dictionary, note that when
  * a DType is passed in, this lookup may be ignored.
@@ -219,14 +235,15 @@ _PyArray_MapPyTypeToDType(
  * Lookup the DType for a registered known python scalar type.
  *
  * @param pytype Python Type to look up
+ * @param cache One-entry lookup cache of the caller or NULL.
  * @return Borrowed DType (kept alive by the pytype-to-DType mapping, whose
  *         entries are never removed, or a builtin/static DType), None if it
  *         is a known non-scalar, or NULL if an unknown object.
  */
 static inline PyArray_DTypeMeta *
-npy_discover_dtype_from_pytype(PyTypeObject *pytype)
+npy_discover_dtype_from_pytype(PyTypeObject *pytype, npy_pytype_cache *cache)
 {
-    PyObject *DType;
+    PyArray_DTypeMeta *DType;
 
     if (pytype == &PyArray_Type) {
         return (PyArray_DTypeMeta *)Py_None;
@@ -250,20 +267,30 @@ npy_discover_dtype_from_pytype(PyTypeObject *pytype)
     else if (pytype == &PyBool_Type) {
         return typenum_to_dtypemeta(NPY_BOOL);
     }
+    if (cache != NULL && cache->pytype == pytype) {
+        return cache->DType;
+    }
     /* Builtin scalar types: avoid the dict lookup (it must take a reference) */
     int typenum = _typenum_fromtypeobj((PyObject *)pytype, 0);
     if (typenum != NPY_NOTYPE) {
-        return typenum_to_dtypemeta(typenum);
+        DType = typenum_to_dtypemeta(typenum);
     }
-    int res = PyDict_GetItemRef(_npy_module_state->global_pytype_to_type_dict,
-                                (PyObject *)pytype, &DType);
-    if (res <= 0) {
-        /* the python type is not known or an error was set */
-        return NULL;
+    else {
+        PyObject *res;
+        if (PyDict_GetItemRef(_npy_module_state->global_pytype_to_type_dict,
+                              (PyObject *)pytype, &res) <= 0) {
+            /* the python type is not known (not cached) or an error was set */
+            return NULL;
+        }
+        Py_DECREF(res);  /* the dict keeps it alive */
+        assert(res == Py_None || PyObject_TypeCheck(res, (PyTypeObject *)&PyArrayDTypeMeta_Type));
+        DType = (PyArray_DTypeMeta *)res;
     }
-    Py_DECREF(DType);  /* the dict keeps it alive */
-    assert(DType == Py_None || PyObject_TypeCheck(DType, (PyTypeObject *)&PyArrayDTypeMeta_Type));
-    return (PyArray_DTypeMeta *)DType;
+    if (cache != NULL) {
+        cache->pytype = pytype;
+        cache->DType = DType;
+    }
+    return DType;
 }
 
 /*
@@ -274,7 +301,7 @@ npy_discover_dtype_from_pytype(PyTypeObject *pytype)
 NPY_NO_EXPORT PyObject *
 PyArray_DiscoverDTypeFromScalarType(PyTypeObject *pytype)
 {
-    PyObject *DType = (PyObject *)npy_discover_dtype_from_pytype(pytype);
+    PyObject *DType = (PyObject *)npy_discover_dtype_from_pytype(pytype, NULL);
     if (DType == NULL || DType == Py_None) {
         return NULL;
     }
@@ -294,13 +321,14 @@ PyArray_DiscoverDTypeFromScalarType(PyTypeObject *pytype)
  *        flags is NULL, this is not
  * @param fixed_DType if not NULL, will be checked first for whether or not
  *        it can/wants to handle the (possible) scalar value.
+ * @param cache One-entry pytype lookup cache of the caller or NULL.
  * @return Borrowed reference to either a DType class, Py_None, or NULL on
  *         error.
  */
 static inline PyArray_DTypeMeta *
 discover_dtype_from_pyobject(
         PyObject *obj, enum _dtype_discovery_flags *flags,
-        PyArray_DTypeMeta *fixed_DType)
+        PyArray_DTypeMeta *fixed_DType, npy_pytype_cache *cache)
 {
     if (fixed_DType != NULL) {
         /*
@@ -315,7 +343,7 @@ discover_dtype_from_pyobject(
         }
     }
 
-    PyArray_DTypeMeta *DType = npy_discover_dtype_from_pytype(Py_TYPE(obj));
+    PyArray_DTypeMeta *DType = npy_discover_dtype_from_pytype(Py_TYPE(obj), cache);
     if (DType != NULL) {
         return DType;
     }
@@ -510,7 +538,7 @@ PyArray_Pack(PyArray_Descr *descr, void *item, PyObject *value)
 
     /* discover_dtype_from_pyobject includes a check for is_known_scalar_type */
     PyArray_DTypeMeta *DType = discover_dtype_from_pyobject(
-            value, NULL, NPY_DTYPE(descr));
+            value, NULL, NPY_DTYPE(descr), NULL);
     if (DType == NULL) {
         return -1;
     }
@@ -832,6 +860,7 @@ find_descriptor_from_array(
         if (iter == NULL) {
             return -1;
         }
+        npy_pytype_cache pytype_cache = {NULL, NULL};
         while (iter->index < iter->size) {
             PyArray_DTypeMeta *item_DType;
             /*
@@ -843,7 +872,8 @@ find_descriptor_from_array(
                 Py_DECREF(iter);
                 return -1;
             }
-            item_DType = discover_dtype_from_pyobject(elem, &flags, DType);
+            item_DType = discover_dtype_from_pyobject(
+                    elem, &flags, DType, &pytype_cache);
             if (item_DType == NULL) {
                 Py_DECREF(iter);
                 Py_DECREF(elem);
@@ -991,6 +1021,8 @@ PyArray_AdaptDescriptorToArray(
  * @param flags Discovery flags (reporting and behaviour flags, see def.)
  * @param copy Specifies the copy behavior. -1 is corresponds to copy=None,
  *        0 to copy=False, and 1 to copy=True in the Python API.
+ * @param pytype_cache One-entry pytype lookup cache, shared by the items of
+ *        the parent sequence (or NULL).
  * @return The updated number of maximum dimensions (i.e. scalars will set
  *         this to the current dimensions).
  */
@@ -1000,7 +1032,7 @@ PyArray_DiscoverDTypeAndShape_Recursive(
         npy_intp out_shape[NPY_MAXDIMS],
         coercion_cache_obj ***coercion_cache_tail_ptr,
         PyArray_DTypeMeta *fixed_DType, enum _dtype_discovery_flags *flags,
-        int copy)
+        int copy, npy_pytype_cache *pytype_cache)
 {
     PyArrayObject *arr = NULL;
     PyObject *seq;
@@ -1027,7 +1059,7 @@ PyArray_DiscoverDTypeAndShape_Recursive(
     }
 
     /* If this is a known scalar, find the corresponding DType class */
-    DType = discover_dtype_from_pyobject(obj, flags, fixed_DType);
+    DType = discover_dtype_from_pyobject(obj, flags, fixed_DType, pytype_cache);
     if (DType == NULL) {
         return -1;
     }
@@ -1181,6 +1213,7 @@ PyArray_DiscoverDTypeAndShape_Recursive(
     }
 
     int ret = -1;
+    npy_pytype_cache item_pytype_cache = {NULL, NULL};
 
     NPY_BEGIN_CRITICAL_SECTION_SEQUENCE_FAST(obj);
 
@@ -1215,12 +1248,12 @@ PyArray_DiscoverDTypeAndShape_Recursive(
         copy = -1;
     }
 
-    /* Recursive call for each sequence item */
+    /* Recursive call for each sequence item (sharing one lookup cache) */
     for (Py_ssize_t i = 0; i < size; i++) {
         max_dims = PyArray_DiscoverDTypeAndShape_Recursive(
                 objects[i], curr_dims + 1, max_dims,
                 out_descr, out_shape, coercion_cache_tail_ptr, fixed_DType,
-                flags, copy);
+                flags, copy, &item_pytype_cache);
 
         if (max_dims < 0) {
             goto finish;
@@ -1330,7 +1363,7 @@ PyArray_DiscoverDTypeAndShape(
 
     int ndim = PyArray_DiscoverDTypeAndShape_Recursive(
             obj, 0, max_dims, out_descr, out_shape, &coercion_cache,
-            fixed_DType, &flags, copy);
+            fixed_DType, &flags, copy, NULL);
     if (ndim < 0) {
         goto fail;
     }
