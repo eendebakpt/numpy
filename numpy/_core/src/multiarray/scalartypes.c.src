@@ -4848,6 +4848,13 @@ NPY_NO_EXPORT int
 get_typeobj_idx(PyTypeObject * obj)
 {
     npy_intp imin = 0, imax = sizeof(typeobjects) / sizeof(typeobjects[0]) - 1;
+    /*
+     * The builtin scalar types are static and thus close together in memory,
+     * so most other types (Python builtins, heap types) are rejected here.
+     */
+    if (obj < typeobjects[imin].type || obj > typeobjects[imax].type) {
+        return -1;
+    }
     while (imax >= imin)
     {
         npy_intp imid = ((imax - imin) / 2) + imin;
