@@ -4880,11 +4880,7 @@ static void init_basetypes(void)
 NPY_NO_EXPORT int
 get_typeobj_idx(PyTypeObject * obj)
 {
-    npy_intp imin = 0, imax = NTYPEOBJECTS - 1;
-    /*
-     * The builtin scalar types are static and thus close together in memory,
-     * so most other types (Python builtins, heap types) are rejected here.
-     */
+    /* Most other types (Python builtins, heap types) are rejected here. */
     npy_uintp offset = (npy_uintp)obj - (npy_uintp)typeobjects[0].type;
     if (offset > typeobj_span) {
         return -1;
@@ -4893,6 +4889,8 @@ get_typeobj_idx(PyTypeObject * obj)
         int i = typeobj_slots[offset >> typeobj_shift];
         return (i >= 0 && typeobjects[i].type == obj) ? i : -1;
     }
+    /* The types are not laid out compactly: binary search */
+    npy_intp imin = 0, imax = NTYPEOBJECTS - 1;
     while (imax >= imin)
     {
         npy_intp imid = ((imax - imin) / 2) + imin;

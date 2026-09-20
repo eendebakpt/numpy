@@ -21,6 +21,7 @@
 #include "multiarraymodule.h"
 #include "module_state.h"
 #include "npy_sort.h"
+#include "scalartypes.h"
 
 /*
  * Internal helper to create new instances
@@ -701,35 +702,12 @@ stringdtype_is_known_scalar_type(PyArray_DTypeMeta *cls,
     if (python_builtins_are_known_scalar_types(cls, pytype)) {
         return 1;
     }
-    // accept every built-in numpy dtype
-    else if (pytype == &PyBoolArrType_Type ||
-             pytype == &PyByteArrType_Type ||
-             pytype == &PyShortArrType_Type ||
-             pytype == &PyIntArrType_Type ||
-             pytype == &PyLongArrType_Type ||
-             pytype == &PyLongLongArrType_Type ||
-             pytype == &PyUByteArrType_Type ||
-             pytype == &PyUShortArrType_Type ||
-             pytype == &PyUIntArrType_Type ||
-             pytype == &PyULongArrType_Type ||
-             pytype == &PyULongLongArrType_Type ||
-             pytype == &PyHalfArrType_Type ||
-             pytype == &PyFloatArrType_Type ||
-             pytype == &PyDoubleArrType_Type ||
-             pytype == &PyLongDoubleArrType_Type ||
-             pytype == &PyCFloatArrType_Type ||
-             pytype == &PyCDoubleArrType_Type ||
-             pytype == &PyCLongDoubleArrType_Type ||
-             pytype == &PyIntpArrType_Type ||
-             pytype == &PyUIntpArrType_Type ||
-             pytype == &PyDatetimeArrType_Type ||
-             pytype == &PyTimedeltaArrType_Type)
-    {
-        return 1;
-    }
-    // otherwise np.str_ discovers its fixed-width 'U' descriptor, whose
-    // cast into StringDType strips trailing NULs setitem would preserve
-    else if (pytype == &PyUnicodeArrType_Type) {
+    // accept every built-in numpy dtype, and np.str_ (whose fixed-width 'U'
+    // descriptor would otherwise be discovered; the cast into StringDType
+    // strips trailing NULs setitem would preserve)
+    int typenum = _typenum_fromtypeobj((PyObject *)pytype, 0);
+    if (typenum != NPY_NOTYPE && typenum != NPY_OBJECT
+            && typenum != NPY_STRING && typenum != NPY_VOID) {
         return 1;
     }
     return 0;
