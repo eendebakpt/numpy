@@ -4836,18 +4836,61 @@ static int compare_types(const void * a_, const void * b_)
     return 0;
 }
 
+#define NTYPEOBJECTS (sizeof(typeobjects) / sizeof(typeobjects[0]))
+
+/*
+ * The builtin scalar types are static objects defined in this file, so in
+ * practice they sit next to each other in memory.  Then
+ * `(address - lowest address) >> shift`, with shift = floor(log2(smallest
+ * gap)), gives each type its own slot in a small table and the lookup needs
+ * no search.  Hits are always verified, so the memory layout only decides
+ * whether the table is used (otherwise we binary search), never the result.
+ */
+static npy_uintp typeobj_span = 0;
+static int typeobj_shift = -1;
+static npy_int8 typeobj_slots[64];
+
 static void init_basetypes(void)
 {
-    qsort(typeobjects, sizeof(typeobjects) / sizeof(typeobjects[0]),
-          sizeof(typeobjects[0]),
-          compare_types);
+    qsort(typeobjects, NTYPEOBJECTS, sizeof(typeobjects[0]), compare_types);
+
+    npy_uintp lowest = (npy_uintp)typeobjects[0].type;
+    npy_uintp mingap = (npy_uintp)typeobjects[1].type - lowest;
+    for (size_t i = 2; i < NTYPEOBJECTS; i++) {
+        npy_uintp gap = (npy_uintp)typeobjects[i].type
+                        - (npy_uintp)typeobjects[i - 1].type;
+        mingap = gap < mingap ? gap : mingap;
+    }
+    int shift = 0;
+    while ((mingap >> (shift + 1)) != 0) {
+        shift++;
+    }
+    typeobj_span = (npy_uintp)typeobjects[NTYPEOBJECTS - 1].type - lowest;
+    if ((typeobj_span >> shift) < sizeof(typeobj_slots)) {
+        memset(typeobj_slots, -1, sizeof(typeobj_slots));
+        for (size_t i = 0; i < NTYPEOBJECTS; i++) {
+            npy_uintp offset = (npy_uintp)typeobjects[i].type - lowest;
+            typeobj_slots[offset >> shift] = (npy_int8)i;
+        }
+        typeobj_shift = shift;
+    }
 }
 
 
 NPY_NO_EXPORT int
 get_typeobj_idx(PyTypeObject * obj)
 {
-    npy_intp imin = 0, imax = sizeof(typeobjects) / sizeof(typeobjects[0]) - 1;
+    /* Most other types (Python builtins, heap types) are rejected here. */
+    npy_uintp offset = (npy_uintp)obj - (npy_uintp)typeobjects[0].type;
+    if (offset > typeobj_span) {
+        return -1;
+    }
+    if (NPY_LIKELY(typeobj_shift >= 0)) {
+        int i = typeobj_slots[offset >> typeobj_shift];
+        return (i >= 0 && typeobjects[i].type == obj) ? i : -1;
+    }
+    /* The types are not laid out compactly: binary search */
+    npy_intp imin = 0, imax = NTYPEOBJECTS - 1;
     while (imax >= imin)
     {
         npy_intp imid = ((imax - imin) / 2) + imin;
