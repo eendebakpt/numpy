@@ -1,5 +1,4 @@
 import platform
-import warnings
 
 import pytest
 
@@ -325,24 +324,80 @@ class TestCommaDecimalPointLocale(CommaDecimalPointLocale):
 
 
 @pytest.mark.parametrize("int_val", [
-    # cases discussed in gh-10723
-    # and gh-9968
-    2 ** 1024, 0])
+    # cases discussed in gh-10723 and gh-9968
+    2 ** 1024, 2 ** 1023, 0, 1, -1, 12345, -(2 ** 63), 2 ** 63, 2 ** 64 - 1])
 def test_longdouble_from_int(int_val):
     # for issue gh-9968
+    if int_val.bit_length() > LD_INFO.maxexp:
+        with pytest.raises(OverflowError):
+            np.longdouble(int_val)
+        return
     str_val = str(int_val)
-    # we'll expect a RuntimeWarning on platforms
-    # with np.longdouble equivalent to np.double
-    # for large integer input
-    with warnings.catch_warnings(record=True) as w:
-        warnings.filterwarnings('always', '', RuntimeWarning)
-        # can be inf==inf on some platforms
-        assert np.longdouble(int_val) == np.longdouble(str_val)
-        # we can't directly compare the int and
-        # max longdouble value on all platforms
-        if np.allclose(np.finfo(np.longdouble).max,
-                       np.finfo(np.double).max) and w:
-            assert w[0].category is RuntimeWarning
+    assert np.longdouble(int_val) == np.longdouble(str_val)
+
+
+def _longdouble_rounding_cases():
+    # Ties at every chunk boundary the conversion might use, for the
+    # actual mantissa width of the platform's longdouble.
+    m = LD_INFO.nmant + 1  # significant bits
+    for k in [2, 3, 10, 63, 64, 65, 127, 128, 129, 200, 500]:
+        # exactly representable; the lsb of its mantissa is 1 << k, so the
+        # rounding bit is 1 << (k - 1) and the sticky bits are below that
+        top = 1 << (m - 1 + k)
+        # rounding bit set, no sticky: tie -> even (down)
+        yield top | (1 << (k - 1)), top
+        # rounding bit set and sticky: must round up
+        yield top | (1 << (k - 1)) | 1, top + (1 << k)
+        # lsb odd, exact tie: ties-to-even rounds up
+        yield top | (1 << k) | (1 << (k - 1)), top + (2 << k)
+        # just below the rounding bit: round down
+        yield top | ((1 << (k - 1)) - 1), top
+        # all ones below the top bit: rounds up to the next power of two
+        yield (top << 1) - 1, top << 1
+
+
+@pytest.mark.parametrize("int_val, expected", list(_longdouble_rounding_cases()))
+def test_longdouble_from_int_rounding(int_val, expected):
+    # gh-28639: the conversion must round-half-even on the exact value
+    assert int(np.longdouble(int_val)) == expected
+    assert int(np.longdouble(-int_val)) == -expected
+
+
+@pytest.mark.parametrize("nbits", [1, 8, 31, 52, 53, 63, 64, 65, 100, 113,
+                                   114, 127, 128, 129, 200, 1000])
+def test_longdouble_from_int_exact(nbits):
+    # Integers with at most as many significant bits as the mantissa
+    # convert exactly; larger ones round-trip to within half an ulp.
+    m = LD_INFO.nmant + 1
+    for val in [2 ** nbits - 1, 2 ** (nbits - 1), 2 ** (nbits - 1) + 1]:
+        res = int(np.longdouble(val))
+        if nbits <= m:
+            assert res == val
+        else:
+            assert abs(res - val) <= 2 ** (nbits - m - 1)
+
+
+def test_longdouble_from_int_overflow():
+    # gh-28639: huge integers raise OverflowError instead of failing on
+    # the int -> str conversion limit or overflowing to inf.
+    max_int = int(LD_INFO.max)
+    assert np.longdouble(max_int) == LD_INFO.max
+    with pytest.raises(OverflowError):
+        np.longdouble(2 ** LD_INFO.maxexp)
+    with pytest.raises(OverflowError):
+        # rounds up to 2 ** maxexp, as float(2 ** 1024 - 1) does
+        np.longdouble(2 ** LD_INFO.maxexp - 1)
+    with pytest.raises(OverflowError):
+        np.longdouble(-(2 ** LD_INFO.maxexp))
+
+    huge = 10 ** 4301  # exceeds sys.get_int_max_str_digits()
+    if huge.bit_length() > LD_INFO.maxexp:
+        with pytest.raises(OverflowError):
+            np.longdouble(huge)
+    else:
+        res = np.longdouble(huge)
+        assert abs(int(res) - huge) <= huge * 2 ** -LD_INFO.nmant
+
 
 @pytest.mark.parametrize("bool_val", [
     True, False])

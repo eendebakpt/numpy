@@ -1,0 +1,9 @@
+Conversion of Python ints to ``np.longdouble`` is numeric and raises on overflow
+--------------------------------------------------------------------------------
+Python integers are now converted to `numpy.longdouble` numerically, with a
+single correctly rounded step, instead of via a decimal string.  This makes the
+conversion faster and lifts the ``sys.get_int_max_str_digits()`` limit, so
+integers with more than 4300 digits convert on platforms whose ``long double``
+can represent them.  An integer too large for ``np.longdouble`` now raises an
+``OverflowError`` (matching ``float(int)`` and `numpy.float64`) instead of
+returning ``inf`` with a ``RuntimeWarning``.

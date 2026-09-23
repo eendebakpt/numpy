@@ -7,7 +7,6 @@
 #include "numpy/ndarraytypes.h"
 #include "numpy/npy_math.h"
 
-#include "numpyos.h"
 
 /*
  * Heavily derived from PyLong_FromDouble
@@ -97,79 +96,103 @@ done:
     return v;
 }
 
-/* Helper function to get unicode(PyLong).encode('utf8') */
-static PyObject *
-_PyLong_Bytes(PyObject *long_obj) {
-    PyObject *bytes;
-    PyObject *unicode = PyObject_Str(long_obj);
-    if (unicode == NULL) {
-        return NULL;
-    }
-    bytes = PyUnicode_AsUTF8String(unicode);
-    Py_DECREF(unicode);
-    return bytes;
-}
+#include <float.h>
 
-
-/**
- * TODO: currently a hack that converts the long through a string. This is
- * correct, but slow.
+/*
+ * Convert a Python int to long double with a single, correct rounding.
  *
- * Another approach would be to do this numerically, in a similar way to
- * PyLong_AsDouble.
- * However, in order to respect rounding modes correctly, this needs to know
- * the size of the mantissa, which is platform-dependent.
+ * Small ints are converted directly.  For larger ones the top
+ * LDBL_MANT_DIG + 2 bits are extracted, a sticky bit records whether any
+ * lower bit was set, and the result is scaled back with ldexp.  Only the
+ * final addition rounds, so round-half-even is applied to the exact value.
  */
 NPY_VISIBILITY_HIDDEN npy_longdouble
-npy_longdouble_from_PyLong(PyObject *long_obj) {
-    npy_longdouble result = 1234;
-    char *end;
-    char *cstr;
-    PyObject *bytes;
-
-    /* convert the long to a string */
-    bytes = _PyLong_Bytes(long_obj);
-    if (bytes == NULL) {
-        return -1;
+npy_longdouble_from_PyLong(PyObject *long_obj)
+{
+    int overflow;
+    long long ll = PyLong_AsLongLongAndOverflow(long_obj, &overflow);
+    if (overflow == 0) {
+        if (ll == -1 && PyErr_Occurred()) {
+            return -1;
+        }
+        return (npy_longdouble)ll;
     }
 
-    cstr = PyBytes_AsString(bytes);
-    if (cstr == NULL) {
-        goto fail;
-    }
-    end = NULL;
+    npy_longdouble result = -1;
+    PyObject *absval = NULL, *nbits_obj = NULL, *shift_obj = NULL;
+    PyObject *top = NULL, *back = NULL, *hi_obj = NULL, *sixtyfour = NULL;
 
-    /* convert the string to a long double and capture errors */
-    errno = 0;
-    result = NumPyOS_ascii_strtold(cstr, &end);
-    if (errno == ERANGE) {
-        /* strtold returns INFINITY of the correct sign. */
-        if (PyErr_WarnEx(PyExc_RuntimeWarning,
-                "overflow encountered in conversion from python long", 1) < 0) {
-            goto fail;
+    absval = PyNumber_Absolute(long_obj);
+    if (absval == NULL) {
+        goto done;
+    }
+    nbits_obj = PyObject_CallMethod(absval, "bit_length", NULL);
+    if (nbits_obj == NULL) {
+        goto done;
+    }
+    long nbits = PyLong_AsLong(nbits_obj);
+    if (nbits == -1 && PyErr_Occurred()) {
+        goto done;
+    }
+    long shift = nbits - (LDBL_MANT_DIG + 2);
+    int sticky = 0;
+    if (shift > 0) {
+        shift_obj = PyLong_FromLong(shift);
+        if (shift_obj == NULL) {
+            goto done;
+        }
+        top = PyNumber_Rshift(absval, shift_obj);
+        if (top == NULL) {
+            goto done;
+        }
+        back = PyNumber_Lshift(top, shift_obj);
+        if (back == NULL) {
+            goto done;
+        }
+        sticky = PyObject_RichCompareBool(back, absval, Py_NE);
+        if (sticky < 0) {
+            goto done;
         }
     }
-    else if (errno) {
-        PyErr_Format(PyExc_RuntimeError,
-                     "Could not parse python long as longdouble: %s (%s)",
-                     cstr,
-                     strerror(errno));
-        goto fail;
+    else {
+        shift = 0;
+        top = absval;
+        Py_INCREF(top);
     }
-
-    /* Extra characters at the end of the string, or nothing parsed */
-    if (end == cstr || *end != '\0') {
-        PyErr_Format(PyExc_RuntimeError,
-                     "Could not parse long as longdouble: %s",
-                     cstr);
-        goto fail;
+    /* top has at most LDBL_MANT_DIG + 2 <= 115 bits: split into two halves */
+    sixtyfour = PyLong_FromLong(64);
+    if (sixtyfour == NULL) {
+        goto done;
     }
+    hi_obj = PyNumber_Rshift(top, sixtyfour);
+    if (hi_obj == NULL) {
+        goto done;
+    }
+    unsigned long long hi = PyLong_AsUnsignedLongLong(hi_obj);
+    if (hi == (unsigned long long)-1 && PyErr_Occurred()) {
+        goto done;
+    }
+    unsigned long long lo = PyLong_AsUnsignedLongLongMask(top) | (unsigned long long)sticky;
 
-    /* finally safe to decref now that we're done with `end` */
-    Py_DECREF(bytes);
+    /* hi and lo are exact; this addition is the only rounding step */
+    result = npy_ldexpl((npy_longdouble)hi, 64) + (npy_longdouble)lo;
+    result = npy_ldexpl(result, (int)shift);
+    if (npy_isinf(result)) {
+        PyErr_SetString(PyExc_OverflowError,
+                        "int too large to convert to longdouble");
+        result = -1;
+        goto done;
+    }
+    if (overflow < 0) {
+        result = -result;
+    }
+done:
+    Py_XDECREF(absval);
+    Py_XDECREF(nbits_obj);
+    Py_XDECREF(shift_obj);
+    Py_XDECREF(top);
+    Py_XDECREF(back);
+    Py_XDECREF(hi_obj);
+    Py_XDECREF(sixtyfour);
     return result;
-
-fail:
-    Py_DECREF(bytes);
-    return -1;
 }
