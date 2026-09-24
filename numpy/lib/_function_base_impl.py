@@ -1323,7 +1323,25 @@ def gradient(f, *varargs, axis=None, edge_order=1):
         slice4[axis] = slice(2, None)
 
         if uniform_spacing:
-            out[tuple(slice1)] = (f[tuple(slice4)] - f[tuple(slice2)]) / (2. * ax_dx)
+            scale = 2. * ax_dx
+            if (type(f) is np.ndarray and f.dtype == otype
+                    and np.issubdtype(otype, np.inexact)
+                    and (f.flags.c_contiguous or f.flags.f_contiguous)):
+                # View f and out as flat 1-D arrays.  The central difference
+                # along `axis` is then a single element shift, so the
+                # subtraction and the scaling each run as one contiguous
+                # inner loop without a temporary array.  The slots at index
+                # 0 and -1 along `axis` receive junk here; the edge code
+                # below overwrites them.
+                f_flat = np.ravel(f, order='K')
+                out_flat = np.ravel(out, order='K')
+                shift = f.strides[axis] // f.itemsize
+                interior = out_flat[shift:-shift]
+                np.subtract(f_flat[2 * shift:], f_flat[:-2 * shift],
+                            out=interior)
+                np.divide(interior, scale, out=interior)
+            else:
+                out[tuple(slice1)] = (f[tuple(slice4)] - f[tuple(slice2)]) / scale
         else:
             dx1 = ax_dx[0:-1]
             dx2 = ax_dx[1:]

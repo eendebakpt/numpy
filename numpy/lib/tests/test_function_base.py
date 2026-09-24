@@ -1177,6 +1177,26 @@ class TestGradient:
         assert_array_equal(gradient(x), dx)
         assert_(dx.dtype == np.dtype('timedelta64[D]'))
 
+    def test_datetime64_timedelta_spacing(self):
+        # datetime64 input with a uniform timedelta64 spacing: the division
+        # of the timedelta64 differences by the spacing yields float64,
+        # which must still be stored into the timedelta64 result.
+        x = np.array(
+            ['1910-08-16', '1910-08-11', '1910-08-10', '1910-08-12',
+             '1910-10-12', '1910-12-12', '1912-12-12'],
+            dtype='datetime64[D]')
+        expected = np.array(
+            [-2, -1, 0, 15, 30, 198, 365],
+            dtype='timedelta64[D]')
+        dx = gradient(x, np.timedelta64(2, 'D'))
+        assert_array_equal(dx, expected)
+        assert_(dx.dtype == np.dtype('timedelta64[D]'))
+        # also along a non-unit-stride axis of a 2-D array
+        x2 = np.stack([x, x + np.timedelta64(1, 'D')], axis=1)
+        dx2 = gradient(x2, np.timedelta64(2, 'D'), axis=0)
+        assert_array_equal(dx2, np.stack([expected, expected], axis=1))
+        assert_(dx2.dtype == np.dtype('timedelta64[D]'))
+
     def test_masked(self):
         # Make sure that gradient supports subclasses like masked arrays
         x = np.ma.array([[1, 1], [3, 4]],
