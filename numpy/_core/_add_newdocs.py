@@ -4793,9 +4793,10 @@ _array_method_doc('view', "*args, **kwargs",
     New view of array with the same data.
 
     .. note::
-        Passing None for ``dtype`` is different from omitting the parameter,
-        since the former invokes ``dtype(None)`` which is an alias for
-        ``dtype(np.float64)``.
+        Passing None for ``dtype`` is currently different from omitting the
+        parameter, since the former invokes ``dtype(None)`` which is an alias
+        for ``dtype(np.float64)``.  This is deprecated since NumPy 2.6, pass
+        ``np.float64`` explicitly instead.
 
     Parameters
     ----------

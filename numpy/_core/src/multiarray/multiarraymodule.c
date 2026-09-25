@@ -2348,7 +2348,7 @@ array_fromstring(PyObject *NPY_UNUSED(ignored), PyObject *args, PyObject *keywds
 
     if (!PyArg_ParseTupleAndKeywords(args, keywds,
                 "s#|O&" NPY_SSIZE_T_PYFMT "s$O:fromstring", kwlist,
-                &data, &s, PyArray_DescrConverter, &descr, &nin, &sep, &like)) {
+                &data, &s, PyArray_DescrConverter2, &descr, &nin, &sep, &like)) {
         Py_XDECREF(descr);
         return NULL;
     }
@@ -2389,7 +2389,7 @@ array_fromfile(PyObject *NPY_UNUSED(ignored), PyObject *args, PyObject *keywds)
 
     if (!PyArg_ParseTupleAndKeywords(args, keywds,
                 "O|O&" NPY_SSIZE_T_PYFMT "s" NPY_OFF_T_PYFMT "$O:fromfile", kwlist,
-                &file, PyArray_DescrConverter, &type, &nin, &sep, &offset, &like)) {
+                &file, PyArray_DescrConverter2, &type, &nin, &sep, &offset, &like)) {
         Py_XDECREF(type);
         return NULL;
     }
@@ -2504,7 +2504,7 @@ array_frombuffer(PyObject *NPY_UNUSED(ignored), PyObject *args, PyObject *keywds
 
     if (!PyArg_ParseTupleAndKeywords(args, keywds,
                 "O|O&" NPY_SSIZE_T_PYFMT NPY_SSIZE_T_PYFMT "$O:frombuffer", kwlist,
-                &obj, PyArray_DescrConverter, &type, &nin, &offset, &like)) {
+                &obj, PyArray_DescrConverter2, &type, &nin, &offset, &like)) {
         Py_XDECREF(type);
         return NULL;
     }

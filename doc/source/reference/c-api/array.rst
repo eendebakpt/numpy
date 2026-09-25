@@ -3606,6 +3606,11 @@ Data-type descriptors
     be used with the "O&" character code in :c:func:`PyArg_ParseTuple`
     processing.
 
+    .. deprecated:: 2.6
+        Passing ``None`` gives a ``DeprecationWarning``. Use
+        :c:func:`PyArray_DescrConverter2` for arguments where ``None``
+        should be accepted as "not given".
+
 .. c:function:: int PyArray_DescrConverter2( \
         PyObject* obj, PyArray_Descr** dtype)
 

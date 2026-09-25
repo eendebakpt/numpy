@@ -4,6 +4,7 @@ to document how deprecations should eventually be turned into errors.
 
 """
 import contextlib
+import operator
 import re
 import sys
 import textwrap
@@ -583,3 +584,94 @@ class TestTakeOutDtype(_DeprecationTestCase):
         different_dtype_out = np.zeros_like(indices, dtype=np.uint32)
 
         self.assert_deprecated(lambda: np.take(a, indices, out=different_dtype_out))
+
+
+class TestDTypeNoneDeprecation(_DeprecationTestCase):
+    # Deprecated in NumPy 2.6, 2026-09-25, gh-18434
+    message = "Passing None as a dtype"
+
+    def test_dtype_none(self):
+        self.assert_deprecated(np.dtype, args=(None,))
+
+    @pytest.mark.parametrize("op", [
+        operator.eq, operator.ne, operator.lt, operator.le,
+        operator.gt, operator.ge])
+    def test_comparison_with_none(self, op):
+        self.assert_deprecated(op, args=(np.dtype("float64"), None))
+        # The reflected operation also ends up in `dtype.__eq__` etc.
+        self.assert_deprecated(op, args=(None, np.dtype("float64")))
+
+    def test_dtype_none_in_container(self):
+        # `in` uses `==`, a common idiom that also warns:
+        self.assert_deprecated(lambda: np.dtype("float64") in (None, "S"))
+
+    def test_view_none(self):
+        self.assert_deprecated(np.arange(3).view, args=(None,))
+        self.assert_deprecated(np.arange(3).view, kwargs={"dtype": None})
+
+    def test_astype_none(self):
+        self.assert_deprecated(np.arange(3).astype, args=(None,))
+
+    def test_result_type_none(self):
+        self.assert_deprecated(np.result_type, args=(None,))
+
+    def test_fromiter_none(self):
+        # `dtype` is required for fromiter, so None is not a default
+        self.assert_deprecated(np.fromiter, args=(range(2), None))
+
+    def test_memmap_none(self, tmp_path):
+        # memmap's default is uint8 but None currently means float64
+        fname = tmp_path / "data.bin"
+        fname.write_bytes(bytes(16))
+        self.assert_deprecated(np.memmap, args=(fname,),
+                               kwargs={"dtype": None, "mode": "r"})
+
+    def test_nested_none(self):
+        # None inside a structured or subarray specification
+        self.assert_deprecated(np.dtype, args=([("a", None)],))
+        self.assert_deprecated(np.dtype, args=((None, (2,)),))
+
+    @pytest.mark.parametrize("func", [
+        lambda: np.empty(3, dtype=None),
+        lambda: np.zeros(3, dtype=None),
+        lambda: np.ones(3, dtype=None),
+        lambda: np.full(3, 1.0, dtype=None),
+        lambda: np.empty_like(np.ones(3), dtype=None),
+        lambda: np.ndarray((3,), dtype=None),
+        lambda: np.ndarray((3,), None),
+        lambda: np.asarray([1, 2], dtype=None),
+        lambda: np.array([1, 2], dtype=None),
+        lambda: np.arange(3, dtype=None),
+        lambda: np.sum(np.ones(3), dtype=None),
+        lambda: np.mean(np.ones(3), dtype=None),
+        lambda: np.add.reduce(np.ones(3), dtype=None),
+        lambda: np.add(1, 2, dtype=None),
+        lambda: np.add(1, 2, signature=(None, None, None)),
+        lambda: np.cumsum(np.ones(3), dtype=None),
+        lambda: np.einsum("i->", np.ones(3), dtype=None),
+        lambda: np.float64(1).__array__(None),
+        lambda: np.ones(3).__array__(None),
+        lambda: np.ones(3).view(),
+        lambda: np.frombuffer(bytes(16), dtype=None),
+        lambda: np.fromstring("1 2", dtype=None, sep=" "),
+        lambda: np.tri(2, dtype=None),
+    ])
+    def test_dtype_none_meaning_default_not_deprecated(self, func):
+        self.assert_not_deprecated(func)
+
+    def test_file_functions_dtype_none_not_deprecated(self, tmp_path):
+        fname = tmp_path / "data.bin"
+        fname.write_bytes(bytes(16))
+        self.assert_not_deprecated(np.fromfile, args=(fname,),
+                                   kwargs={"dtype": None})
+        self.assert_not_deprecated(
+            np.lib.format.open_memmap, args=(tmp_path / "a.npy",),
+            kwargs={"mode": "w+", "shape": (2,)})
+        assert np.lib.format.open_memmap(
+            tmp_path / "a.npy", mode="r").dtype == np.float64
+
+    def test_scalar_array_none_keeps_dtype(self):
+        # Like `ndarray.__array__`, `dtype=None` now means no conversion
+        # (previously it meant float64).
+        assert np.int64(1).__array__(None).dtype == np.int64
+        assert np.int64(1).__array__().dtype == np.int64

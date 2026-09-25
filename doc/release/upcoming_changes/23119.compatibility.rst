@@ -1,0 +1,6 @@
+``dtype=None`` in ``__array__`` of NumPy scalars means "no conversion"
+----------------------------------------------------------------------
+``np.int64(1).__array__(None)`` now returns an ``int64`` array, matching
+``ndarray.__array__`` and the ``__array__`` protocol, where ``dtype=None``
+means that no dtype conversion is requested. Previously ``None`` was
+converted to the default dtype and the result was always ``float64``.

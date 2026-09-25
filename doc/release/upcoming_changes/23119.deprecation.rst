@@ -1,0 +1,16 @@
+``None`` as a dtype specification is deprecated
+------------------------------------------------
+Passing ``None`` where a concrete dtype is required is deprecated. This
+affects ``np.dtype(None)``, ``np.result_type(None)``, ``arr.astype(None)``,
+``arr.view(None)``, ``np.fromiter(it, None)``, ``np.memmap(f, dtype=None)``
+and comparisons of a dtype with ``None`` such as ``np.dtype("float64") == None``
+(which currently returns ``True``). All of these currently resolve ``None`` to
+the default dtype, ``float64``; pass ``np.float64`` explicitly instead, and
+use ``dtype is None`` for comparisons, since ``dtype == None`` will return
+``False`` in the future.
+
+Passing ``dtype=None`` to functions where it means "use the default", for
+example ``np.empty(3, dtype=None)``, ``np.sum(arr, dtype=None)`` or
+``np.frombuffer(buf, dtype=None)``, is not affected: the ``ndarray``
+constructor, ``np.frombuffer``, ``np.fromstring`` and ``np.fromfile`` now
+accept ``dtype=None`` in this sense without a warning.

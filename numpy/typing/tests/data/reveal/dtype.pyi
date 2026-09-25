@@ -111,8 +111,8 @@ assert_type(np.dtype(ct.c_bool), np.dtype[np.bool])
 assert_type(np.dtype(ct.c_char), np.dtype[np.bytes_])
 assert_type(np.dtype(ct.py_object), np.dtype[np.object_])
 
-# Special case for None
-assert_type(np.dtype(None), np.dtype[np.float64])
+# Special case for None (deprecated)
+assert_type(np.dtype(None), np.dtype[np.float64])  # type: ignore[deprecated]  # pyright: ignore[reportDeprecated]
 
 # dtypes of dtypes
 assert_type(np.dtype(np.dtype(np.float64)), np.dtype[np.float64])

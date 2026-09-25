@@ -145,6 +145,10 @@ None
 
    The default data type: :class:`float64`.
 
+   .. deprecated:: 2.6
+      Passing ``None`` to :class:`dtype` is deprecated; pass
+      :class:`float64` explicitly instead.
+
 .. index::
    triple: dtype; construction; from type
 

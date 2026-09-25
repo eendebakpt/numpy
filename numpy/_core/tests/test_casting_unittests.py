@@ -466,7 +466,7 @@ class TestCasting:
 
         if nom is not None:
             expected_out = (values * nom // denom).view(to_res)
-            if to_dt == np.dtype("M8"):
+            if to_dt is not None and to_dt == np.dtype("M8"):
                 with pytest.warns(
                     DeprecationWarning,
                     match="The 'generic' unit for NumPy timedelta is deprecated",

@@ -141,25 +141,31 @@ def print_new_cast_table(*, can_cast=True, legacy=False, flags=False):
     # not expose much yet.
     types = np.typecodes["All"]
 
+    def dtype_char(DType):
+        if DType.type is None:
+            # e.g. user DTypes without a scalar type
+            return "?"
+        return np.dtype(DType.type).char
+
     def sorter(x):
         # This is a bit weird hack, to get a table as close as possible to
         # the one printing all typecodes (but expecting user-dtypes).
-        dtype = np.dtype(x.type)
+        char = dtype_char(x)
         try:
-            indx = types.index(dtype.char)
+            indx = types.index(char)
         except ValueError:
             indx = np.inf
-        return (indx, dtype.char)
+        return (indx, char)
 
     dtypes = sorted(dtypes, key=sorter)
 
     def print_table(field="can_cast"):
         print('X', end=' ')
         for dt in dtypes:
-            print(np.dtype(dt.type).char, end=' ')
+            print(dtype_char(dt), end=' ')
         print()
         for from_dt in dtypes:
-            print(np.dtype(from_dt.type).char, end=' ')
+            print(dtype_char(from_dt), end=' ')
             row = table.get(from_dt, {})
             for to_dt in dtypes:
                 print(getattr(row.get(to_dt, no_cast_info), field), end=' ')

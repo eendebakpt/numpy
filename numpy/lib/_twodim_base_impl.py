@@ -456,6 +456,8 @@ def tri(N, M=None, k=0, dtype=float, *, like=None):
     m = greater_equal.outer(arange(N, dtype=_min_int(0, N)),
                             arange(-k, M - k, dtype=_min_int(-k, M - k)))
 
+    if dtype is None:
+        dtype = float
     # Avoid making a copy if the requested type is already bool
     m = m.astype(dtype, copy=False)
 

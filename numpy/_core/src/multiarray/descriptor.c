@@ -1685,6 +1685,15 @@ _convert_from_any(PyObject *obj, int align)
 {
     /* default */
     if (obj == Py_None) {
+        /* Deprecated 2026-09-25, NumPy 2.6 (gh-18434) */
+        if (DEPRECATE(
+                "Passing None as a dtype (e.g. `np.dtype(None)`) is "
+                "deprecated. It currently means the default dtype, float64; "
+                "pass `np.float64` explicitly instead. Comparisons such as "
+                "`dtype == None` will be False in the future, use "
+                "`dtype is None`. (Deprecated NumPy 2.6)") < 0) {
+            return NULL;
+        }
         return PyArray_DescrFromType(NPY_DEFAULT_TYPE);
     }
     else if (PyArray_DescrCheck(obj)) {
@@ -3628,6 +3637,10 @@ arraydescr_richcompare(PyArray_Descr *self, PyObject *other, int cmp_op)
 {
     PyArray_Descr *new = _convert_from_any(other, 0);
     if (new == NULL) {
+        if (other == Py_None) {
+            /* The `None` deprecation warning was raised as an error. */
+            return NULL;
+        }
         /* Cannot convert `other` to dtype */
         PyErr_Clear();
         Py_RETURN_NOTIMPLEMENTED;

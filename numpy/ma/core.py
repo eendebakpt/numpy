@@ -5192,6 +5192,9 @@ class MaskedArray(ndarray):
         (this docstring should be overwritten)
         """
         # !!!: implement out + test!
+        if dtype is None:
+            # `astype(None)` is deprecated; keep the historical float64 result.
+            dtype = np.float64
         m = self._mask
         if m is nomask:
             result = super().trace(offset=offset, axis1=axis1, axis2=axis2,

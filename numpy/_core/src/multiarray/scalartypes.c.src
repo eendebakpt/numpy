@@ -2094,7 +2094,7 @@ gentype_getarray(PyObject *scalar, PyObject *args)
     PyArray_Descr *outcode=NULL;
     PyObject *ret;
 
-    if (!PyArg_ParseTuple(args, "|O&:__array__", &PyArray_DescrConverter,
+    if (!PyArg_ParseTuple(args, "|O&:__array__", &PyArray_DescrConverter2,
                 &outcode)) {
         Py_XDECREF(outcode);
         return NULL;

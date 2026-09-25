@@ -961,7 +961,7 @@ def open_memmap(filename, mode='r+', dtype=None, shape=None,
         _check_version(version)
         # Ensure that the given dtype is an authentic dtype object rather
         # than just something that can be interpreted as a dtype object.
-        dtype = numpy.dtype(dtype)
+        dtype = numpy.dtype(numpy.float64 if dtype is None else dtype)
         if dtype.hasobject:
             msg = "Array can't be memory-mapped: Python objects in dtype."
             raise ValueError(msg)

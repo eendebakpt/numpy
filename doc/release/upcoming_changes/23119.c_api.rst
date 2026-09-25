@@ -1,0 +1,7 @@
+``PyArray_DescrConverter`` warns for ``None``
+---------------------------------------------
+``PyArray_DescrConverter`` (and therefore ``np.dtype()``) now gives a
+``DeprecationWarning`` when passed ``None``, which currently still resolves
+to ``NPY_DEFAULT_TYPE`` (``float64``). C extensions that accept an optional
+``dtype`` argument should use ``PyArray_DescrConverter2``, which converts
+``None`` to ``NULL``.
