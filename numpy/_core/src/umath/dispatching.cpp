@@ -161,7 +161,8 @@ PyUFunc_AddLoopFromSpec_int(PyObject *ufunc, PyArrayMethod_Spec *spec, int priv)
         Py_DECREF(bmeth);
         return -1;
     }
-    PyObject *info = PyTuple_Pack(2, dtypes, bmeth->method);
+    PyObject *items[] = {dtypes, (PyObject *)bmeth->method};
+    PyObject *info = PyTuple_FromArray(items, 2);
     Py_DECREF(bmeth);
     Py_DECREF(dtypes);
     if (info == NULL) {
@@ -417,8 +418,8 @@ resolve_implementation_info(PyUFuncObject *ufunc,
         /* Test all resolvers  */
         PyObject *resolver_info = PySequence_Fast_GET_ITEM(loops, res_idx);
 
-        if (only_promoters && PyObject_TypeCheck(
-                    PyTuple_GET_ITEM(resolver_info, 1), &PyArrayMethod_Type)) {
+        if (only_promoters && !PyCapsule_IsValid(
+                    PyTuple_GET_ITEM(resolver_info, 1), "numpy._ufunc_promoter")) {
             continue;
         }
 
@@ -647,6 +648,10 @@ resolve_implementation_info(PyUFuncObject *ufunc,
         *out_info = NULL;
     }
     else {
+        best_resolver_info = npy_materialize_legacy_loop(ufunc, best_resolver_info);
+        if (best_resolver_info == NULL) {
+            goto finish;
+        }
         *out_info = best_resolver_info;
     }
     ret = 0;
@@ -896,8 +901,45 @@ legacy_promote_using_legacy_type_resolver(PyUFuncObject *ufunc,
 
 
 /*
+ * The legacy (type-table based) loops of a ufunc are registered as
+ * placeholders `(DType_tuple, None)` when the ufunc is created; the wrapping
+ * ArrayMethod is only created when the loop is first resolved (see
+ * `npy_materialize_legacy_loop`).  Most of the ~1300 legacy loops of the
+ * builtin ufuncs are never used, so this saves time and memory at import.
+ * Readers of `ufunc->_loops` must materialize an info before using its
+ * second item.
+ */
+NPY_NO_EXPORT int
+add_legacy_loop_placeholder(PyUFuncObject *ufunc,
+        PyArray_DTypeMeta *operation_dtypes[])
+{
+    PyObject *DType_tuple = PyArray_TupleFromItems(ufunc->nargs,
+            (PyObject **)operation_dtypes, 0);
+    if (DType_tuple == NULL) {
+        return -1;
+    }
+    PyObject *items[] = {DType_tuple, Py_None};
+    PyObject *info = PyTuple_FromArray(items, 2);
+    if (info == NULL) {
+        Py_DECREF(DType_tuple);
+        return -1;
+    }
+    /* An existing loop or placeholder is kept (as in PyUFunc_AddLoop) */
+    int res = PyDict_SetDefaultRef(ufunc->_loops, DType_tuple, info, NULL);
+    Py_DECREF(DType_tuple);
+    Py_DECREF(info);
+    return res < 0 ? -1 : 0;
+}
+
+
+#ifdef Py_GIL_DISABLED
+/* Serializes replacing a placeholder by the materialized loop. */
+static PyMutex legacy_loop_lock = {0};
+#endif
+
+/*
  * Note, this function returns a BORROWED reference to info since it adds
- * it to the loops.
+ * it to the loops.  An existing placeholder for the DTypes is replaced.
  */
 NPY_NO_EXPORT PyObject *
 add_and_return_legacy_wrapping_ufunc_loop(PyUFuncObject *ufunc,
@@ -915,21 +957,133 @@ add_and_return_legacy_wrapping_ufunc_loop(PyUFuncObject *ufunc,
         Py_DECREF(DType_tuple);
         return NULL;
     }
-    PyObject *info = PyTuple_Pack(2, DType_tuple, method);
-    Py_DECREF(DType_tuple);
+    PyObject *items[] = {DType_tuple, (PyObject *)method};
+    PyObject *info = PyTuple_FromArray(items, 2);
     Py_DECREF(method);
     if (info == NULL) {
+        Py_DECREF(DType_tuple);
         return NULL;
     }
-    if (PyUFunc_AddLoop(ufunc, info, ignore_duplicate) < 0) {
-        Py_DECREF(info);
-        return NULL;
+
+    PyObject *result = NULL;
+    int duplicate = 0;
+#ifdef Py_GIL_DISABLED
+    PyMutex_Lock(&legacy_loop_lock);
+#endif
+    PyObject *existing = PyDict_GetItemWithError(  // noqa: borrowed-ref OK
+            ufunc->_loops, DType_tuple);
+    if (existing == NULL && PyErr_Occurred()) {
+        /* pass, result is NULL */
     }
-    /* Loop currently borrowed from the _loops (use original if not replaced) */
-    PyObject *result = PyDict_GetItemWithError(  // noqa: borrowed-ref OK
-        ufunc->_loops, PyTuple_GET_ITEM(info, 0));
+    else if (existing == NULL || npy_loop_info_is_placeholder(existing)) {
+        if (PyDict_SetItem(ufunc->_loops, DType_tuple, info) == 0) {
+            result = info;  /* now owned by `_loops` */
+        }
+    }
+    else if (ignore_duplicate) {
+        result = existing;
+    }
+    else {
+        duplicate = 1;
+    }
+#ifdef Py_GIL_DISABLED
+    PyMutex_Unlock(&legacy_loop_lock);
+#endif
+    if (duplicate) {
+        PyErr_Format(PyExc_TypeError,
+                "A loop/promoter has already been registered with '%s' for %R",
+                ufunc_get_name_cstr(ufunc), DType_tuple);
+    }
+    Py_DECREF(DType_tuple);
     Py_DECREF(info);
     return result;
+}
+
+
+/*
+ * Replace a legacy loop placeholder by the actual wrapping ArrayMethod
+ * (a no-op for other infos).  Returns a borrowed reference to the info
+ * stored in `ufunc->_loops` or NULL on error.
+ */
+NPY_NO_EXPORT PyObject *
+npy_materialize_legacy_loop(PyUFuncObject *ufunc, PyObject *info)
+{
+    if (!npy_loop_info_is_placeholder(info)) {
+        return info;
+    }
+    PyObject *DType_tuple = PyTuple_GET_ITEM(info, 0);
+    PyObject *capsule = PyTuple_GET_ITEM(info, 1);
+    PyArrayMethod_StridedLoop *indexed_loop = NULL;
+    if (capsule != Py_None) {
+        indexed_loop = (PyArrayMethod_StridedLoop *)PyCapsule_GetPointer(
+                capsule, NPY_LEGACY_INDEXED_LOOP_CAPSULE);
+        if (indexed_loop == NULL) {
+            return NULL;
+        }
+    }
+    PyArray_DTypeMeta *dtypes[NPY_MAXARGS];
+    for (int i = 0; i < ufunc->nargs; i++) {
+        dtypes[i] = (PyArray_DTypeMeta *)PyTuple_GET_ITEM(DType_tuple, i);
+    }
+    PyObject *stored = add_and_return_legacy_wrapping_ufunc_loop(
+            ufunc, dtypes, 1);
+    if (stored != NULL && indexed_loop != NULL) {
+        PyArrayMethodObject *method = (
+                (PyArrayMethodObject *)PyTuple_GET_ITEM(stored, 1));
+        method->contiguous_indexed_loop = indexed_loop;
+    }
+    return stored;
+}
+
+
+/*
+ * Store the indexed loop (used by `ufunc.at`) of the not yet materialized
+ * legacy loop for `nargs` times the DType of `typenum` in its placeholder
+ * (called right after the ufunc is created).
+ */
+NPY_NO_EXPORT int
+set_legacy_indexed_loop(PyUFuncObject *ufunc, int typenum, int nargs,
+        PyArrayMethod_StridedLoop *indexed_loop)
+{
+    int res = -1;
+    PyObject *dtype = (PyObject *)PyArray_DTypeFromTypeNum(typenum);
+    PyObject *items[2] = {NULL, NULL};
+    PyObject *info;
+    PyObject *DType_tuple = PyTuple_New(nargs);
+    if (DType_tuple == NULL) {
+        goto finish;
+    }
+    for (int i = 0; i < nargs; i++) {
+        PyTuple_SET_ITEM(DType_tuple, i, Py_NewRef(dtype));
+    }
+    info = PyDict_GetItemWithError(  // noqa: borrowed-ref OK
+            ufunc->_loops, DType_tuple);
+    if (info == NULL || PyTuple_GET_ITEM(info, 1) != Py_None) {
+        if (!PyErr_Occurred()) {
+            PyErr_Format(PyExc_RuntimeError,
+                    "cannot add indexed loop to ufunc %s for %R",
+                    ufunc_get_name_cstr(ufunc), DType_tuple);
+        }
+        goto finish;
+    }
+    items[0] = DType_tuple;
+    items[1] = PyCapsule_New(
+            (void *)indexed_loop, NPY_LEGACY_INDEXED_LOOP_CAPSULE, NULL);
+    if (items[1] == NULL) {
+        goto finish;
+    }
+    info = PyTuple_FromArray(items, 2);
+    if (info == NULL) {
+        goto finish;
+    }
+    res = PyDict_SetItem(ufunc->_loops, DType_tuple, info);
+    Py_DECREF(info);
+
+  finish:
+    Py_XDECREF(items[1]);
+    Py_XDECREF(DType_tuple);
+    Py_DECREF(dtype);
+    return res;
 }
 
 
@@ -1416,8 +1570,9 @@ install_logical_ufunc_promoter(PyObject *ufunc)
                 "internal numpy array, logical ufunc was not a ufunc?!");
         return -1;
     }
-    PyObject *dtype_tuple = PyTuple_Pack(3,
-            &PyArrayDescr_Type, &PyArrayDescr_Type, &PyArrayDescr_Type, NULL);
+    PyObject *descr_types[] = {(PyObject *)&PyArrayDescr_Type,
+            (PyObject *)&PyArrayDescr_Type, (PyObject *)&PyArrayDescr_Type};
+    PyObject *dtype_tuple = PyTuple_FromArray(descr_types, 3);
     if (dtype_tuple == NULL) {
         return -1;
     }
@@ -1428,7 +1583,8 @@ install_logical_ufunc_promoter(PyObject *ufunc)
         return -1;
     }
 
-    PyObject *info = PyTuple_Pack(2, dtype_tuple, promoter);
+    PyObject *items[] = {dtype_tuple, promoter};
+    PyObject *info = PyTuple_FromArray(items, 2);
     Py_DECREF(dtype_tuple);
     Py_DECREF(promoter);
     if (info == NULL) {
@@ -1437,36 +1593,6 @@ install_logical_ufunc_promoter(PyObject *ufunc)
     int res = PyUFunc_AddLoop((PyUFuncObject *)ufunc, info, 0);
     Py_DECREF(info);
     return res;
-}
-
-/*
- * Return the PyArrayMethodObject or PyCapsule that matches a registered
- * tuple of identical dtypes. Return a borrowed ref of the first match.
- */
-NPY_NO_EXPORT PyObject *
-get_info_no_cast(PyUFuncObject *ufunc, PyArray_DTypeMeta *op_dtype,
-                 int ndtypes)
-{
-    PyObject *t_dtypes = PyTuple_New(ndtypes);
-    if (t_dtypes == NULL) {
-        return NULL;
-    }
-    for (int i=0; i < ndtypes; i++) {
-        Py_INCREF(op_dtype);
-        PyTuple_SET_ITEM(t_dtypes, i, (PyObject *)op_dtype);
-    }
-    PyObject *info;
-    if (PyDict_GetItemRef(ufunc->_loops, t_dtypes, &info) < 0) {
-        Py_DECREF(t_dtypes);
-        return NULL;
-    }
-    Py_DECREF(t_dtypes);
-    if (info != NULL) {
-        PyObject *result = PyTuple_GET_ITEM(info, 1);
-        Py_DECREF(info);
-        return result;
-    }
-    Py_RETURN_NONE;
 }
 
 /*UFUNC_API
@@ -1498,7 +1624,8 @@ PyUFunc_AddPromoter(
     if (PyCapsule_GetPointer(promoter, "numpy._ufunc_promoter") == NULL) {
         return -1;
     }
-    PyObject *info = PyTuple_Pack(2, DType_tuple, promoter);
+    PyObject *items[] = {DType_tuple, promoter};
+    PyObject *info = PyTuple_FromArray(items, 2);
     if (info == NULL) {
         return -1;
     }

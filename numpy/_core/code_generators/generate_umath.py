@@ -1597,36 +1597,17 @@ def make_ufuncs(funcdict):
         if uf.typereso is not None:
             mlist.append(rf"((PyUFuncObject *)f)->type_resolver = &{uf.typereso};")
         for c in uf.indexed:
-            # Handle indexed loops by getting the underlying ArrayMethodObject
-            # from the dict in f._loops and setting its field appropriately
+            # Indexed loops are attached to the legacy loop's ArrayMethod
+            # (stored in its placeholder until the loop is materialized).
             fmt = textwrap.dedent("""
-            {{
-                PyArray_DTypeMeta *dtype = PyArray_DTypeFromTypeNum({typenum});
-                PyObject *info = get_info_no_cast((PyUFuncObject *)f,
-                                                   dtype, {count});
-                if (info == NULL) {{
-                    return -1;
-                }}
-                if (info == Py_None) {{
-                    PyErr_SetString(PyExc_RuntimeError,
-                        "cannot add indexed loop to ufunc "
-                        "{name} with {typenum}");
-                    return -1;
-                }}
-                if (!PyObject_TypeCheck(info, &PyArrayMethod_Type)) {{
-                    PyErr_SetString(PyExc_RuntimeError,
-                        "Not a PyArrayMethodObject in ufunc "
-                        "{name} with {typenum}");
-                }}
-                ((PyArrayMethodObject*)info)->contiguous_indexed_loop =
-                                                                 {funcname};
-                /* info is borrowed, no need to decref*/
+            if (set_legacy_indexed_loop((PyUFuncObject *)f, {typenum}, {count},
+                                        {funcname}) < 0) {{
+                return -1;
             }}
             """)
             mlist.append(fmt.format(
                 typenum=f"NPY_{english_upper(chartoname[c])}",
                 count=uf.nin + uf.nout,
-                name=name,
                 funcname=f"{english_upper(chartoname[c])}_{name}_indexed",
             ))
 

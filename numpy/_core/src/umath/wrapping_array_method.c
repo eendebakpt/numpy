@@ -255,6 +255,11 @@ PyUFunc_AddWrappingLoop(PyObject *ufunc_obj,
         goto finish;
     }
     if (existing_info != NULL) {
+        PyObject *stored = npy_materialize_legacy_loop(ufunc, existing_info);
+        if (stored == NULL) {
+            goto finish;
+        }
+        Py_SETREF(existing_info, Py_NewRef(stored));
         PyObject *existing_meth = PyTuple_GET_ITEM(existing_info, 1);
         if (!PyObject_TypeCheck(existing_meth, &PyArrayMethod_Type)) {
             PyErr_SetString(PyExc_TypeError,

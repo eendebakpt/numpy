@@ -5465,12 +5465,12 @@ PyUFunc_FromFuncAndDataAndSignatureAndIdentity(PyUFuncGenericFunction *func, voi
     const char *curr_types = ufunc->types;
     for (int i = 0; i < ntypes * (nin + nout); i += nin + nout) {
         /*
-         * Add all legacy wrapping loops here. This is normally not necessary,
-         * but makes sense.  It could also help/be needed to avoid issues with
-         * ambiguous loops such as: `OO->?` and `OO->O` where in theory the
-         * wrong loop could be picked if only the second one is added.
+         * Register all legacy loops here (as placeholders, the wrapping
+         * ArrayMethod is created on first use).  This is normally not
+         * necessary, but makes sense.  It could also help/be needed to avoid
+         * issues with ambiguous loops such as: `OO->?` and `OO->O` where in
+         * theory the wrong loop could be picked if only the second one is added.
          */
-        PyObject *info;
         PyArray_DTypeMeta *op_dtypes[NPY_MAXARGS];
         for (int arg = 0; arg < nin + nout; arg++) {
             op_dtypes[arg] = PyArray_DTypeFromTypeNum(curr_types[arg]);
@@ -5479,8 +5479,7 @@ PyUFunc_FromFuncAndDataAndSignatureAndIdentity(PyUFuncGenericFunction *func, voi
         }
         curr_types += nin + nout;
 
-        info = add_and_return_legacy_wrapping_ufunc_loop(ufunc, op_dtypes, 1);
-        if (info == NULL) {
+        if (add_legacy_loop_placeholder(ufunc, op_dtypes) < 0) {
             Py_DECREF(ufunc);
             return NULL;
         }
@@ -5767,6 +5766,13 @@ PyUFunc_RegisterLoopForType(PyUFuncObject *ufunc,
         goto fail;
     }
     if (existing_item != NULL) {
+        /* A placeholder is materialized (patched below like other loops) */
+        PyObject *stored = npy_materialize_legacy_loop(ufunc, existing_item);
+        if (stored == NULL) {
+            Py_DECREF(existing_item);
+            goto fail;
+        }
+        Py_SETREF(existing_item, Py_NewRef(stored));
         PyObject *registered = PyTuple_GET_ITEM(existing_item, 1);
         int not_compatible = (
             !PyObject_TypeCheck(registered, &PyArrayMethod_Type) ||
