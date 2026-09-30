@@ -114,6 +114,9 @@ Misc
 - ``p.truncate(size)`` -- Truncate ``p`` to given size
 
 """
+# Imported lazily on Python 3.15+ (PEP 810): only the series that is used is loaded.
+__lazy_modules__ = [f"numpy.polynomial.{name}" for name in (
+    "chebyshev", "hermite", "hermite_e", "laguerre", "legendre", "polynomial")]
 from .chebyshev import Chebyshev
 from .hermite import Hermite
 from .hermite_e import HermiteE

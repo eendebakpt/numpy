@@ -1,5 +1,8 @@
 __all__ = ['matrix', 'bmat', 'asmatrix']
 
+# Imported lazily on Python 3.15+ (PEP 810), only needed for some functions.
+__lazy_modules__ = ["numpy.linalg"]
+
 import ast
 import sys
 import warnings

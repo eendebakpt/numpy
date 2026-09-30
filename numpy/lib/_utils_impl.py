@@ -1,3 +1,6 @@
+# Imported lazily on Python 3.15+ (PEP 810), only needed for some functions.
+__lazy_modules__ = ["platform"]
+
 import os
 import platform
 import sys
