@@ -161,7 +161,8 @@ PyUFunc_AddLoopFromSpec_int(PyObject *ufunc, PyArrayMethod_Spec *spec, int priv)
         Py_DECREF(bmeth);
         return -1;
     }
-    PyObject *info = PyTuple_Pack(2, dtypes, bmeth->method);
+    PyObject *items[] = {dtypes, (PyObject *)bmeth->method};
+    PyObject *info = PyTuple_FromArray(items, 2);
     Py_DECREF(bmeth);
     Py_DECREF(dtypes);
     if (info == NULL) {
@@ -915,7 +916,8 @@ add_and_return_legacy_wrapping_ufunc_loop(PyUFuncObject *ufunc,
         Py_DECREF(DType_tuple);
         return NULL;
     }
-    PyObject *info = PyTuple_Pack(2, DType_tuple, method);
+    PyObject *items[] = {DType_tuple, (PyObject *)method};
+    PyObject *info = PyTuple_FromArray(items, 2);
     Py_DECREF(DType_tuple);
     Py_DECREF(method);
     if (info == NULL) {
@@ -1416,8 +1418,9 @@ install_logical_ufunc_promoter(PyObject *ufunc)
                 "internal numpy array, logical ufunc was not a ufunc?!");
         return -1;
     }
-    PyObject *dtype_tuple = PyTuple_Pack(3,
-            &PyArrayDescr_Type, &PyArrayDescr_Type, &PyArrayDescr_Type, NULL);
+    PyObject *descr_types[] = {(PyObject *)&PyArrayDescr_Type,
+            (PyObject *)&PyArrayDescr_Type, (PyObject *)&PyArrayDescr_Type};
+    PyObject *dtype_tuple = PyTuple_FromArray(descr_types, 3);
     if (dtype_tuple == NULL) {
         return -1;
     }
@@ -1428,7 +1431,8 @@ install_logical_ufunc_promoter(PyObject *ufunc)
         return -1;
     }
 
-    PyObject *info = PyTuple_Pack(2, dtype_tuple, promoter);
+    PyObject *items[] = {dtype_tuple, promoter};
+    PyObject *info = PyTuple_FromArray(items, 2);
     Py_DECREF(dtype_tuple);
     Py_DECREF(promoter);
     if (info == NULL) {
@@ -1498,7 +1502,8 @@ PyUFunc_AddPromoter(
     if (PyCapsule_GetPointer(promoter, "numpy._ufunc_promoter") == NULL) {
         return -1;
     }
-    PyObject *info = PyTuple_Pack(2, DType_tuple, promoter);
+    PyObject *items[] = {DType_tuple, promoter};
+    PyObject *info = PyTuple_FromArray(items, 2);
     if (info == NULL) {
         return -1;
     }

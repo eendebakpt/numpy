@@ -95,11 +95,24 @@ intern_strings(void)
     return 0;
 }
 
-#define IMPORT_GLOBAL(base_path, name, object)  \
-    assert(object == NULL);                     \
-    object = npy_import(base_path, name);       \
-    if (object == NULL) {                       \
-        return -1;                              \
+/*
+ * Fetch `base_path.name` into `object`.  Consecutive uses of the same
+ * `base_path` reuse the module (kept in `module`/`module_name`), which
+ * avoids going through the import system for every attribute.
+ */
+#define IMPORT_GLOBAL(base_path, name, object)                              \
+    assert(object == NULL);                                                 \
+    if (module_name == NULL || strcmp(module_name, base_path) != 0) {       \
+        Py_XSETREF(module, PyImport_ImportModule(base_path));               \
+        module_name = base_path;                                            \
+        if (module == NULL) {                                               \
+            return -1;                                                      \
+        }                                                                   \
+    }                                                                       \
+    object = PyObject_GetAttrString(module, name);                          \
+    if (object == NULL) {                                                   \
+        Py_DECREF(module);                                                  \
+        return -1;                                                          \
     }
 
 
@@ -132,6 +145,8 @@ initialize_static_globals(void)
      * module for performance reasons
      */
     npy_static_pydata_struct *static_pydata = &state->static_pydata;
+    PyObject *module = NULL;
+    const char *module_name = NULL;
 
     IMPORT_GLOBAL("math", "floor",
                   static_pydata->math_floor_func);
@@ -189,6 +204,7 @@ initialize_static_globals(void)
 
     IMPORT_GLOBAL("os", "PathLike",
                   static_pydata->os_PathLike);
+    Py_CLEAR(module);
 
     // default_truediv_type_tup
     PyArray_Descr *tmp = PyArray_DescrFromType(NPY_DOUBLE);

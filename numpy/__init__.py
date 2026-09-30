@@ -102,8 +102,13 @@ except NameError:
 if __NUMPY_SETUP__:
     sys.stderr.write('Running from numpy source directory.\n')
 else:
-    # Allow distributors to run custom init code before importing numpy._core
-    from . import _distributor_init
+    # Allow distributors to run custom init code before importing numpy._core.
+    # It is imported inside `try` so that it is always executed, also under
+    # lazy imports (PEP 810, Python 3.15+).
+    try:
+        from . import _distributor_init
+    except ImportError:
+        raise
 
     try:
         from numpy.__config__ import show_config

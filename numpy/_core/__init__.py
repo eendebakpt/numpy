@@ -125,14 +125,15 @@ del nt
 # do this after everything else, to minimize the chance of this misleadingly
 # appearing in an import-time traceback
 # add these for module-freeze analysis (like PyInstaller)
-from . import (
-    _add_newdocs,
-    _add_newdocs_scalars,
-    _dtype,
-    _dtype_ctypes,
-    _internal,
-    _methods,
-)
+from . import _dtype, _dtype_ctypes, _internal, _methods
+
+# `_add_newdocs` and `_add_newdocs_scalars` only attach docstrings to the
+# C-defined objects.  They must be executed now: an import inside `try` is
+# always eager, also under lazy imports (PEP 810, Python 3.15+).
+try:
+    from . import _add_newdocs, _add_newdocs_scalars
+except ImportError:
+    raise
 from .numeric import absolute as abs
 
 acos = numeric.arccos

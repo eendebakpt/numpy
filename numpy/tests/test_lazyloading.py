@@ -50,3 +50,23 @@ def test_import_avoids_expensive_stdlib_modules():
         """)
     p = run_subprocess([sys.executable, "-c", code])
     assert p.stdout.strip() == "[]"
+
+
+@pytest.mark.skipif(not HAS_SUBPROCESSES, reason="platform cannot start subprocesses")
+@pytest.mark.skipif(sys.version_info < (3, 15),
+                    reason="PEP 810 lazy imports need Python 3.15")
+def test_global_lazy_imports():
+    # Under `-X lazy_imports=all` (PEP 810) modules that are imported only for
+    # their side effects (docstrings, distributor init) must still be executed.
+    code = textwrap.dedent(r"""
+        import sys
+        import numpy as np
+        assert np.arange(3).sum() == 3
+        assert "numpy._distributor_init" in sys.modules
+        assert np.ndarray.__doc__ and np.ndarray.sum.__doc__  # from _add_newdocs
+        assert np.float64.__doc__  # from _add_newdocs_scalars
+        assert np.linalg.norm([3, 4]) == 5
+        print("ok")
+        """)
+    p = run_subprocess([sys.executable, "-X", "lazy_imports=all", "-c", code])
+    assert p.stdout.strip() == "ok"
