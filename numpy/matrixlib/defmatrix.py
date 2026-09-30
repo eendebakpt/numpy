@@ -8,9 +8,15 @@ import numpy._core.numeric as N
 from numpy._core.numeric import concatenate, isscalar
 from numpy._utils import set_module
 
-# While not in __all__, matrix_power used to be defined here, so we import
-# it for backward compatibility.
-from numpy.linalg import matrix_power
+
+def __getattr__(name):
+    # While not in __all__, matrix_power used to be defined here, so keep it
+    # reachable for backward compatibility (without importing numpy.linalg
+    # at import time).
+    if name == "matrix_power":
+        from numpy.linalg import matrix_power
+        return matrix_power
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 def _convert_from_string(data):
@@ -234,6 +240,7 @@ class matrix(N.ndarray):
         return self
 
     def __pow__(self, other):
+        from numpy.linalg import matrix_power
         return matrix_power(self, other)
 
     def __ipow__(self, other):

@@ -35,7 +35,14 @@
 NPY_VISIBILITY_HIDDEN int
 npy_cpu_dispatch_tracer_init(PyObject *mod);
 /**
- * Insert data into the initialized '__cpu_targets_info__' dictionary.
+ * Build the '__cpu_targets_info__' dictionary (a new reference) from the
+ * information recorded by 'npy_cpu_dispatch_trace()'.  The module's
+ * `__getattr__` calls this on first access of the attribute.
+ */
+NPY_VISIBILITY_HIDDEN PyObject *
+npy_cpu_dispatch_targets_info(void);
+/**
+ * Record dispatch information for the '__cpu_targets_info__' dictionary.
  *
  * This function adds the function name as a key and another dictionary as a value.
  * The inner dictionary holds the 'signature' as a key and splits 'dispatch_info' into another dictionary.

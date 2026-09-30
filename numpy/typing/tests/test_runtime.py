@@ -101,3 +101,25 @@ class TestRuntimeProtocol:
     def test_issubclass(self, cls: type[Any], obj: object) -> None:
         assert issubclass(type(obj), cls)
         assert not issubclass(type(None), cls)
+
+
+def test_private_typing_lazy_names() -> None:
+    # `numpy._typing` loads its submodules lazily at runtime; the runtime name
+    # table must match the (static) imports seen by type checkers.
+    import ast
+    import importlib
+
+    source = open(_npt.__file__).read()
+    tree = ast.parse(source)
+    if_node = next(node for node in tree.body if isinstance(node, ast.If))
+    static = {}
+    for node in if_node.body:
+        assert isinstance(node, ast.ImportFrom)
+        for alias in node.names:
+            static[alias.name] = node.module
+    assert static == _npt._name_to_submodule
+    for name, submodule in static.items():
+        module = importlib.import_module(f"numpy._typing.{submodule}")
+        assert getattr(_npt, name) is getattr(module, name)
+    with pytest.raises(AttributeError):
+        _npt.nonexistent  # type: ignore[attr-defined]

@@ -16,10 +16,30 @@ from numpy.exceptions import DTypePromotionError
 from ._multiarray_umath import _is_view_safe_cast
 from .multiarray import StringDType, array, dtype, promote_types
 
-try:
-    import ctypes
-except ImportError:
-    ctypes = None
+
+def _get_ctypes():
+    """Import ``ctypes`` on first use (``None`` if unavailable).
+
+    The result is stored as the module attribute ``ctypes`` (which is also
+    how tests disable ctypes support).
+    """
+    try:
+        return ctypes
+    except NameError:
+        pass
+    try:
+        import ctypes as _ctypes_module
+    except ImportError:
+        _ctypes_module = None
+    globals()["ctypes"] = _ctypes_module
+    return _ctypes_module
+
+
+def __getattr__(name):
+    if name == "ctypes":
+        return _get_ctypes()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 
 if sys.byteorder == 'little':
     _nbo = '<'
@@ -228,6 +248,7 @@ def _getintp_ctype():
     val = _getintp_ctype.cache
     if val is not None:
         return val
+    ctypes = _get_ctypes()
     if ctypes is None:
         import numpy as np
         val = dummy_ctype(np.intp)
@@ -262,6 +283,7 @@ class _ctypes:
     def __init__(self, array, ptr=None):
         self._arr = array
 
+        ctypes = _get_ctypes()
         if ctypes:
             self._ctypes = ctypes
             self._data = self._ctypes.c_void_p(ptr)

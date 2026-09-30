@@ -4755,6 +4755,38 @@ array__wrapfunc(PyObject *self,
 }
 
 
+/*
+ * Module `__getattr__` (PEP 562): attributes that are costly to build and
+ * rarely used are created on first access and then stored in the module
+ * dict, so that later lookups do not come through here.
+ */
+static PyObject *
+module_getattr(PyObject *module, PyObject *name)
+{
+    PyObject *value;
+    if (PyUnicode_CompareWithASCIIString(name, "__cpu_targets_info__") == 0) {
+        value = npy_cpu_dispatch_targets_info();
+    }
+    else if (PyUnicode_CompareWithASCIIString(name, "__cpu_features__") == 0) {
+        value = npy_cpu_features_dict();
+    }
+    else {
+        PyErr_Format(PyExc_AttributeError,
+                "module '%s' has no attribute '%U'", PyModule_GetName(module), name);
+        return NULL;
+    }
+    if (value == NULL) {
+        return NULL;
+    }
+    PyObject *stored;
+    if (PyDict_SetDefaultRef(PyModule_GetDict(module), name, value, &stored) < 0) {
+        Py_DECREF(value);
+        return NULL;
+    }
+    Py_DECREF(value);
+    return stored;
+}
+
 static struct PyMethodDef array_module_methods[] = {
     {"_wrapfunc",
         (PyCFunction)array__wrapfunc,
@@ -4924,6 +4956,10 @@ static struct PyMethodDef array_module_methods[] = {
         METH_VARARGS | METH_KEYWORDS, NULL},
     {"unravel_index", (PyCFunction)arr_unravel_index,
         METH_VARARGS | METH_KEYWORDS, NULL},
+    {"_cleandoc", (PyCFunction)arr_cleandoc,
+        METH_O, NULL},
+    {"__getattr__", (PyCFunction)module_getattr,
+        METH_O, NULL},
     {"add_docstring", (PyCFunction)arr_add_docstring,
         METH_FASTCALL, NULL},
     {"packbits", (PyCFunction)io_pack,
@@ -5403,15 +5439,7 @@ _multiarray_umath_exec_impl(PyObject *m, multiarray_umath_state *state) {
     PyDict_SetItemString(d, "__version__", s);
     Py_DECREF(s);
 
-    s = npy_cpu_features_dict();
-    if (s == NULL) {
-        return -1;
-    }
-    if (PyDict_SetItemString(d, "__cpu_features__", s) < 0) {
-        Py_DECREF(s);
-        return -1;
-    }
-    Py_DECREF(s);
+    /* `__cpu_features__` and `__cpu_targets_info__` are built lazily by module_getattr */
 
     s = npy_cpu_baseline_list();
     if (s == NULL) {

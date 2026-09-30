@@ -4,7 +4,6 @@ and the Python code for the NumPy-namespace function
 
 """
 import os
-import pickle
 import warnings
 from contextlib import nullcontext
 
@@ -236,6 +235,7 @@ def _ptp(a, axis=None, out=None, keepdims=False):
     )
 
 def _dump(self, file, protocol=2):
+    import pickle
     if hasattr(file, 'write'):
         ctx = nullcontext(file)
     else:
@@ -244,6 +244,7 @@ def _dump(self, file, protocol=2):
         pickle.dump(self, f, protocol=protocol)
 
 def _dumps(self, protocol=2):
+    import pickle
     return pickle.dumps(self, protocol=protocol)
 
 def _bitwise_count(a, out=None, *, where=True, casting='same_kind',

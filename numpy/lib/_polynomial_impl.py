@@ -26,7 +26,6 @@ from numpy.exceptions import RankWarning
 from numpy.lib._function_base_impl import trim_zeros
 from numpy.lib._twodim_base_impl import diag, vander
 from numpy.lib._type_check_impl import imag, iscomplex, mintypecode, real
-from numpy.linalg import eigvals, inv, lstsq
 
 array_function_dispatch = functools.partial(
     overrides.array_function_dispatch, module='numpy')
@@ -137,6 +136,7 @@ def poly(seq_of_zeros):
     sh = seq_of_zeros.shape
 
     if len(sh) == 2 and sh[0] == sh[1] and sh[0] != 0:
+        from numpy.linalg import eigvals
         seq_of_zeros = eigvals(seq_of_zeros)
     elif len(sh) == 1:
         dt = seq_of_zeros.dtype
@@ -249,6 +249,7 @@ def roots(p):
         # build companion matrix and find its eigenvalues (the roots)
         A = diag(NX.ones((N - 2,), p.dtype), -1)
         A[0, :] = -p[1:] / p[0]
+        from numpy.linalg import eigvals
         roots = eigvals(A)
 
         # backwards compat: return real values if possible
@@ -674,6 +675,7 @@ def polyfit(x, y, deg, rcond=None, full=False, w=None, cov=False):
     # scale lhs to improve condition number and solve
     scale = NX.sqrt((lhs * lhs).sum(axis=0))
     lhs /= scale
+    from numpy.linalg import inv, lstsq
     c, resids, rank, s = lstsq(lhs, rhs, rcond)
     c = (c.T / scale).T  # broadcast scale coefficients
 

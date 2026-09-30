@@ -6,7 +6,6 @@ import functools
 import itertools
 import operator
 import os
-import pickle
 import re
 import warnings
 import weakref
@@ -491,6 +490,7 @@ def load(file, mmap_mode=None, allow_pickle=False, fix_imports=True,
                     "the file you can load it unsafely using the "
                     "`allow_pickle=` keyword argument or `pickle.load()`.")
             try:
+                import pickle
                 return pickle.load(fid, **pickle_kwargs)
             except Exception as e:
                 raise pickle.UnpicklingError(

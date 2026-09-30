@@ -177,11 +177,6 @@ typedef struct npy_static_pydata_struct {
     PyObject *axes_2d_obj_kwargs;
 
     /*
-     * Used for CPU feature detection and dispatch
-     */
-    PyObject *cpu_dispatch_registry;
-
-    /*
      * references to ArrayMethod implementations that are cached
      * to avoid repeatedly creating them
      */
@@ -227,6 +222,14 @@ typedef struct npy_static_cdata_struct {
      * This is initialized alongside the built-in dtypes
      */
     npy_int16 _letter_to_num['z' + 1 - '?'];
+
+    /*
+     * Dispatch information recorded by npy_cpu_dispatch_trace(); the
+     * `__cpu_targets_info__` dict is built from it on first access.
+     */
+    struct npy_cpu_dispatch_record **cpu_dispatch_records;
+    Py_ssize_t n_cpu_dispatch_records;
+    Py_ssize_t cpu_dispatch_records_capacity;
 } npy_static_cdata_struct;
 
 #ifdef __cplusplus

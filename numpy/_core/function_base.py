@@ -1,12 +1,11 @@
 import functools
-import inspect
 import operator
 import types
 import warnings
 
 import numpy as np
 from numpy._core import overrides
-from numpy._core._multiarray_umath import _array_converter
+from numpy._core._multiarray_umath import _array_converter, _cleandoc
 from numpy._core.multiarray import add_docstring
 
 from . import numeric as _nx
@@ -485,7 +484,7 @@ def _needs_add_docstring(obj):
 
 
 def _add_docstring(obj, doc, warn_on_python):
-    doc = inspect.cleandoc(doc)
+    doc = _cleandoc(doc)
 
     if warn_on_python and not _needs_add_docstring(obj):
         warnings.warn(

@@ -1617,6 +1617,150 @@ arr_add_docstring(PyObject *module, PyObject *const *args, Py_ssize_t len_args)
     Py_RETURN_NONE;
 }
 
+
+/*
+ * C implementation of `inspect.cleandoc` (used when NumPy installs its
+ * docstrings at import time; importing `inspect` itself costs several
+ * milliseconds and the Python implementation is slow for ~10000 lines).
+ *
+ * Tabs are expanded (tab size 8), leading spaces of the first line are
+ * removed, the common leading-space margin of all further non-blank lines
+ * is removed and leading/trailing blank lines are dropped.
+ */
+NPY_NO_EXPORT PyObject *
+arr_cleandoc(PyObject *NPY_UNUSED(module), PyObject *doc)
+{
+    typedef struct { const char *s; Py_ssize_t n; } doc_line;
+
+    if (!PyUnicode_Check(doc)) {
+        PyErr_SetString(PyExc_TypeError, "_cleandoc() argument must be str");
+        return NULL;
+    }
+    Py_ssize_t len;
+    const char *src = PyUnicode_AsUTF8AndSize(doc, &len);
+    if (src == NULL) {
+        return NULL;
+    }
+    PyObject *result = NULL;
+    char *expanded = NULL, *out = NULL;
+    doc_line *lines = NULL;
+
+    if (memchr(src, '\t', len) != NULL) {
+        /* str.expandtabs(8): the column counts characters, reset at \n, \r */
+        Py_ssize_t ntabs = 0;
+        for (Py_ssize_t i = 0; i < len; i++) {
+            ntabs += (src[i] == '\t');
+        }
+        expanded = PyMem_Malloc(len + ntabs * 8 + 1);
+        if (expanded == NULL) {
+            PyErr_NoMemory();
+            goto finish;
+        }
+        Py_ssize_t col = 0, j = 0;
+        for (Py_ssize_t i = 0; i < len; i++) {
+            char c = src[i];
+            if (c == '\t') {
+                Py_ssize_t incr = 8 - (col % 8);
+                memset(expanded + j, ' ', incr);
+                j += incr;
+                col += incr;
+            }
+            else {
+                expanded[j++] = c;
+                if (c == '\n' || c == '\r') {
+                    col = 0;
+                }
+                else if (((unsigned char)c & 0xC0) != 0x80) {
+                    col++;  /* not a UTF-8 continuation byte */
+                }
+            }
+        }
+        src = expanded;
+        len = j;
+    }
+    const char *end = src + len;
+
+    /* Common margin (leading spaces) of the non-blank lines after the first */
+    Py_ssize_t margin = PY_SSIZE_T_MAX;
+    Py_ssize_t nlines = 1;
+    const char *nl = memchr(src, '\n', len);
+    const char *line = (nl == NULL) ? end : nl + 1;
+    while (nl != NULL) {
+        nlines++;
+        nl = memchr(line, '\n', end - line);
+        const char *lend = (nl == NULL) ? end : nl;
+        const char *p = line;
+        while (p < lend && *p == ' ') {
+            p++;
+        }
+        if (p < lend && p - line < margin) {
+            margin = p - line;
+        }
+        line = lend + 1;
+    }
+
+    lines = PyMem_Malloc(nlines * sizeof(doc_line));
+    if (lines == NULL) {
+        PyErr_NoMemory();
+        goto finish;
+    }
+    Py_ssize_t k = 0;
+    line = src;
+    while (1) {
+        nl = memchr(line, '\n', end - line);
+        const char *lend = (nl == NULL) ? end : nl;
+        const char *p = line;
+        if (k == 0) {
+            while (p < lend && *p == ' ') {
+                p++;
+            }
+        }
+        else if (margin != PY_SSIZE_T_MAX) {
+            /* non-blank lines have at least `margin` leading spaces */
+            while (p < lend && *p == ' ' && p - line < margin) {
+                p++;
+            }
+        }
+        lines[k].s = p;
+        lines[k].n = lend - p;
+        k++;
+        if (nl == NULL) {
+            break;
+        }
+        line = nl + 1;
+    }
+    assert(k == nlines);
+
+    /* Drop trailing and leading blank lines, then join */
+    Py_ssize_t start = 0, stop = k;
+    while (stop > start && lines[stop - 1].n == 0) {
+        stop--;
+    }
+    while (start < stop && lines[start].n == 0) {
+        start++;
+    }
+    out = PyMem_Malloc(len + 1);
+    if (out == NULL) {
+        PyErr_NoMemory();
+        goto finish;
+    }
+    Py_ssize_t olen = 0;
+    for (Py_ssize_t i = start; i < stop; i++) {
+        if (i > start) {
+            out[olen++] = '\n';
+        }
+        memcpy(out + olen, lines[i].s, lines[i].n);
+        olen += lines[i].n;
+    }
+    result = PyUnicode_FromStringAndSize(out, olen);
+
+  finish:
+    PyMem_Free(out);
+    PyMem_Free(lines);
+    PyMem_Free(expanded);
+    return result;
+}
+
 /*
  * This function packs boolean values in the input array into the bits of a
  * byte array. Truth values are determined as usual: 0 is false, everything

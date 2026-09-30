@@ -1,3 +1,5 @@
+import pytest
+
 from numpy._core import _umath_tests
 from numpy._core._multiarray_umath import (
     __cpu_baseline__,
@@ -46,3 +48,16 @@ def test_dispatcher():
 
     all_sfx.append("func")  # add the baseline
     assert_equal(test["all"], all_sfx)
+
+
+def test_lazy_module_attributes():
+    # `__cpu_targets_info__` and `__cpu_features__` are built on first access
+    import numpy._core._multiarray_umath as mu
+    from numpy._core._multiarray_umath import __cpu_targets_info__
+
+    assert __cpu_targets_info__ is mu.__cpu_targets_info__
+    assert __cpu_targets_info__ is mu.__dict__["__cpu_targets_info__"]
+    assert set(__cpu_targets_info__["add"]["ddd"]) == {"current", "available"}
+    assert isinstance(mu.__cpu_features__, dict)
+    with pytest.raises(AttributeError, match="no attribute 'nonexistent'"):
+        mu.nonexistent

@@ -2,10 +2,10 @@
 import collections
 import enum
 import functools
-import inspect
 
 from numpy._core._multiarray_umath import (
     _ArrayFunctionDispatcher,
+    _cleandoc,
     _get_implementing_args,
     add_docstring,
 )
@@ -172,15 +172,16 @@ def array_function_dispatch(dispatcher=None, module=None, verify=True,
                         f"{implementation} does not seem to comply.")
 
         if docs_from_dispatcher and dispatcher.__doc__ is not None:
-            doc = inspect.cleandoc(dispatcher.__doc__)
+            doc = _cleandoc(dispatcher.__doc__)
             add_docstring(implementation, doc)
 
         config = None if reduction is None else (reduction[0].reduce, reduction[1])
         public_api = _ArrayFunctionDispatcher(dispatcher, implementation, config)
         functools.update_wrapper(public_api, implementation)
 
-        if not verify and not getattr(implementation, "__text_signature__", None):
-            public_api.__signature__ = inspect.signature(dispatcher)
+        # NOTE: `inspect.signature(public_api)` follows `__wrapped__` for
+        # Python implementations; for C implementations the dispatcher's
+        # signature is computed lazily by `_ArrayFunctionDispatcher.__signature__`.
 
         if module is not None:
             public_api.__module__ = module

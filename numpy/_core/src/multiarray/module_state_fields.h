@@ -109,7 +109,6 @@ extern "C" {
     F(wrapit_kwnames_to_scalar)    \
     F(axes_1d_obj_kwargs)          \
     F(axes_2d_obj_kwargs)          \
-    F(cpu_dispatch_registry)       \
     F(VoidToGenericMethod)         \
     F(GenericToVoidMethod)         \
     F(ObjectToGenericMethod)       \

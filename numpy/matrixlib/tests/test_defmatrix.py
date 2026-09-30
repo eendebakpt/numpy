@@ -473,3 +473,12 @@ class TestPatternMatching:
                 assert_array_equal(b, [[3, 4]])
             case _:
                 raise AssertionError("2D matrix did not match sequence pattern")
+
+
+def test_defmatrix_matrix_power_alias():
+    # matrix_power used to be defined in defmatrix; still reachable there
+    from numpy.matrixlib import defmatrix
+    from numpy.matrixlib.defmatrix import matrix_power as mp
+    assert mp is matrix_power
+    assert defmatrix.matrix_power is matrix_power
+    assert_raises(AttributeError, getattr, defmatrix, "nonexistent")

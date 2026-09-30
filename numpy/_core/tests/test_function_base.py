@@ -597,3 +597,36 @@ class TestAdd_newdoc:
         # give a warning (or even error) in the future.
         add_newdoc("numpy._core", "flatiter", ("index", "bad docstring"))
         assert prev_doc == np._core.flatiter.index.__doc__
+
+
+class TestCleandoc:
+    @pytest.mark.parametrize("doc", [
+        "",
+        "\n",
+        "\n\n  \n",
+        "single line",
+        "  first line indented",
+        "\n    Summary.\n\n    Details with\n        deeper indent.\n\n    ",
+        "first\n    second\n  third\n",
+        "first\n\n\n    second\n\n",
+        "\tTabbed\n\t\tdeeper\n\t  mixed\n",
+        "  \t after\tspace\n  x\n",
+        "unicode: ×\n    ünïcode line\n    é\ttab after non-ascii\n",
+        "crlf\r\n    line\r\n    other\r\n",
+        "\n    blank line with more spaces below\n          \n    end\n",
+        "\n      blank line with fewer spaces below\n  \n      end\n",
+        "no trailing newline\n    indented",
+        "only first\n",
+        "\n\n\n",
+        "   \n   \n    a\n   ",
+    ])
+    def test_matches_inspect_cleandoc(self, doc):
+        import inspect
+
+        from numpy._core._multiarray_umath import _cleandoc
+        assert _cleandoc(doc) == inspect.cleandoc(doc)
+
+    def test_type_error(self):
+        from numpy._core._multiarray_umath import _cleandoc
+        with pytest.raises(TypeError):
+            _cleandoc(b"bytes")

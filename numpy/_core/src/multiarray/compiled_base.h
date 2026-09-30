@@ -20,6 +20,8 @@ arr_unravel_index(PyObject *, PyObject *, PyObject *);
 NPY_NO_EXPORT PyObject *
 arr_add_docstring(PyObject *, PyObject *const *, Py_ssize_t);
 NPY_NO_EXPORT PyObject *
+arr_cleandoc(PyObject *, PyObject *);
+NPY_NO_EXPORT PyObject *
 io_pack(PyObject *, PyObject *, PyObject *);
 NPY_NO_EXPORT PyObject *
 io_unpack(PyObject *, PyObject *, PyObject *);

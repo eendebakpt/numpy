@@ -1,5 +1,4 @@
 import os
-import platform
 import sys
 import types
 
@@ -33,6 +32,7 @@ def show_runtime():
        ``__cpu_baseline__`` and ``__cpu_dispatch__``
 
     """
+    import platform
     from pprint import pprint
 
     from numpy._core._multiarray_umath import (

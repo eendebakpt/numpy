@@ -870,6 +870,98 @@ dispatcher_get_implementation(
 }
 
 
+/*
+ * `__signature__` is created on first access.  For a C implementation without
+ * a text signature the dispatcher's signature is used (through
+ * `inspect.signature`); otherwise the implementation carries its own signature,
+ * which `inspect.signature` finds through `__wrapped__`, so no attribute is
+ * exposed.
+ * (Doing this at decoration time would import `inspect` during `import numpy`
+ * and compute ~50 signatures that are practically never used.)
+ */
+static PyObject *
+dispatcher_get_signature(
+        PyArray_ArrayFunctionDispatcherObject *self, void *NPY_UNUSED(closure))
+{
+    PyObject *dict = PyObject_GenericGetDict((PyObject *)self, NULL);
+    if (dict == NULL) {
+        return NULL;
+    }
+    PyObject *sig;
+    int res = PyDict_GetItemStringRef(dict, "__signature__", &sig);
+    if (res != 0) {
+        /* stored explicitly (or an error occurred) */
+        Py_DECREF(dict);
+        return sig;
+    }
+    /*
+     * Python implementations and C implementations with a text signature
+     * provide their own signature (found through `__wrapped__`).
+     */
+    int has_own_signature = (
+            self->relevant_arg_func == NULL || PyFunction_Check(self->default_impl));
+    if (!has_own_signature) {
+        PyObject *text_sig;
+        if (PyObject_GetOptionalAttrString(
+                self->default_impl, "__text_signature__", &text_sig) < 0) {
+            Py_DECREF(dict);
+            return NULL;
+        }
+        has_own_signature = (text_sig != NULL && text_sig != Py_None);
+        Py_XDECREF(text_sig);
+    }
+    if (has_own_signature) {
+        Py_DECREF(dict);
+        PyErr_Format(PyExc_AttributeError,
+                "'%.100s' object has no attribute '__signature__'",
+                Py_TYPE(self)->tp_name);
+        return NULL;
+    }
+    PyObject *signature_func = npy_import("inspect", "signature");
+    if (signature_func == NULL) {
+        Py_DECREF(dict);
+        return NULL;
+    }
+    sig = PyObject_CallOneArg(signature_func, self->relevant_arg_func);
+    Py_DECREF(signature_func);
+    if (sig == NULL) {
+        Py_DECREF(dict);
+        return NULL;
+    }
+    res = PyDict_SetItemString(dict, "__signature__", sig);
+    Py_DECREF(dict);
+    if (res < 0) {
+        Py_DECREF(sig);
+        return NULL;
+    }
+    return sig;
+}
+
+
+static int
+dispatcher_set_signature(
+        PyArray_ArrayFunctionDispatcherObject *self, PyObject *value,
+        void *NPY_UNUSED(closure))
+{
+    PyObject *dict = PyObject_GenericGetDict((PyObject *)self, NULL);
+    if (dict == NULL) {
+        return -1;
+    }
+    int res;
+    if (value == NULL) {
+        res = PyDict_DelItemString(dict, "__signature__");
+        if (res < 0 && PyErr_ExceptionMatches(PyExc_KeyError)) {
+            PyErr_SetString(PyExc_AttributeError, "__signature__");
+        }
+    }
+    else {
+        res = PyDict_SetItemString(dict, "__signature__", value);
+    }
+    Py_DECREF(dict);
+    return res;
+}
+
+
 static PyObject *
 dispatcher_reduce(PyObject *self, PyObject *NPY_UNUSED(args))
 {
@@ -887,6 +979,8 @@ static struct PyMethodDef func_dispatcher_methods[] = {
 static struct PyGetSetDef func_dispatcher_getset[] = {
     {"__dict__", &PyObject_GenericGetDict, 0, NULL, 0},
     {"_implementation", (getter)&dispatcher_get_implementation, 0, NULL, 0},
+    {"__signature__", (getter)&dispatcher_get_signature,
+        (setter)&dispatcher_set_signature, NULL, 0},
     {0, 0, 0, 0, 0}
 };
 

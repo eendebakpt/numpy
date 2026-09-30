@@ -9,8 +9,7 @@ NOTE: Many of the methods of ndarray have corresponding functions.
 
 """
 
-import textwrap
-
+from numpy._core._multiarray_umath import _cleandoc
 from numpy._core.function_base import add_newdoc
 from numpy._core.overrides import get_array_function_like_doc  # noqa: F401
 
@@ -3414,7 +3413,7 @@ def _array_method_doc(name: str, params: str, doc: str) -> None:
     params = f"$self, {params}"
 
     # add docstring to `np.ndarray.{name}`
-    doc = textwrap.dedent(doc).strip()
+    doc = _cleandoc(doc)
     doc_array = _METHOD_DOC_TEMPLATE.format(name=name, params=params, doc=doc)
     add_newdoc("numpy._core.multiarray", "ndarray", (name, doc_array))
 

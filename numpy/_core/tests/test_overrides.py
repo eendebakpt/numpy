@@ -888,3 +888,50 @@ def test_function_like():
     bound = np.mean.__get__(MyClass)  # classmethod
     with pytest.raises(TypeError, match="unsupported operand type"):
         bound()
+
+
+class TestDispatcherSignature:
+    # `__signature__` of array-function dispatchers is computed lazily
+    def test_c_implementation_uses_dispatcher_signature(self):
+        # np.inner is implemented in C without a text signature, so the
+        # dispatcher provides the signature (computed and cached on first use)
+        assert np.inner.__wrapped__.__text_signature__ is None
+        sig = inspect.signature(np.inner)
+        assert list(sig.parameters) == ["a", "b"]
+        assert np.inner.__signature__ is sig
+        assert "__signature__" in np.inner.__dict__
+
+    def test_c_implementation_with_text_signature(self):
+        # a C implementation with a text signature is used directly
+        assert np.concatenate.__wrapped__.__text_signature__ is not None
+        assert not hasattr(np.concatenate, "__signature__")
+        sig = inspect.signature(np.concatenate)
+        assert sig == inspect.signature(np.concatenate.__wrapped__)
+        assert sig.parameters["arrays"].kind is inspect.Parameter.POSITIONAL_ONLY
+
+    def test_python_implementation_uses_wrapped(self):
+        # a Python implementation has no `__signature__`, `inspect.signature`
+        # follows `__wrapped__` to the implementation (with its real defaults).
+        assert not hasattr(np.sum, "__signature__")
+        sig = inspect.signature(np.sum)
+        assert sig == inspect.signature(np.sum.__wrapped__)
+        assert sig.parameters["axis"].default is None
+        assert sig.parameters["keepdims"].default is np._NoValue
+
+    def test_set_and_delete(self):
+        def dispatcher(a, b=None):
+            return (a,)
+
+        @array_function_dispatch(dispatcher)
+        def func(a, b=None):
+            return a
+
+        assert not hasattr(func, "__signature__")
+        sig = inspect.signature(dispatcher)
+        func.__signature__ = sig
+        assert func.__signature__ is sig
+        assert inspect.signature(func) is sig
+        del func.__signature__
+        assert not hasattr(func, "__signature__")
+        with pytest.raises(AttributeError):
+            del func.__signature__

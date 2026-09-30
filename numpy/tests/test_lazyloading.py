@@ -33,3 +33,20 @@ def test_lazy_load():
         np.ndarray
         """)
     run_subprocess((sys.executable, '-c', code))
+
+
+@pytest.mark.skipif(not HAS_SUBPROCESSES, reason="platform cannot start subprocesses")
+def test_import_avoids_expensive_stdlib_modules():
+    # These modules are only needed for rarely used functionality and are
+    # imported on first use, to keep `import numpy` fast.
+    code = textwrap.dedent(r"""
+        import sys
+        before = set(sys.modules)
+        import numpy
+        new = set(sys.modules) - before
+        expensive = {"inspect", "ctypes", "pickle", "platform", "textwrap",
+                     "numpy.linalg", "numpy._typing._char_codes"}
+        print(sorted(new & expensive))
+        """)
+    p = run_subprocess([sys.executable, "-c", code])
+    assert p.stdout.strip() == "[]"
