@@ -591,31 +591,42 @@ def test_writeable():
     assert_equal(result.flags.writeable, False)
     assert_raises(ValueError, result.__setitem__, slice(None), 0)
 
-    # the results of broadcast_arrays are read-only as well, also for the
-    # arrays that did not need broadcasting (gh-13974). This holds for the
-    # nditer fast path, the subclass path and the many-arguments path.
-    for results in [broadcast_arrays(original,),
-                    broadcast_arrays(0, original),
-                    broadcast_arrays(0, original, subok=True),
-                    broadcast_arrays(0, *[original] * 64)]:
-        for result in results:
-            assert not result.flags.writeable
-            assert_raises(ValueError, result.__setitem__, slice(None), 0)
-            assert memoryview(result).readonly
+    # but the result of broadcast_arrays needs to be writeable, to
+    # preserve backwards compatibility. This holds for the nditer fast path,
+    # the subclass path and the many-arguments path.
+    test_cases = [((False,), broadcast_arrays(original,)),
+                  ((True, False), broadcast_arrays(0, original)),
+                  ((True, False), broadcast_arrays(0, original, subok=True)),
+                  ((True,) + (False,) * 64,
+                   broadcast_arrays(0, *[original] * 64))]
+    for is_broadcast, results in test_cases:
+        for array_is_broadcast, result in zip(is_broadcast, results):
+            # This will change to False in a future version
+            if array_is_broadcast:
+                with pytest.warns(FutureWarning):
+                    assert_equal(result.flags.writeable, True)
+                with pytest.warns(DeprecationWarning):
+                    result[:] = 0
+                # Warning not emitted, writing to the array resets it
+                assert_equal(result.flags.writeable, True)
+            else:
+                # No warning, the input array is returned unchanged:
+                assert_equal(result.flags.writeable, True)
+                assert result is original
 
     for results in [broadcast_arrays(original),
                     broadcast_arrays(0, original)]:
         for result in results:
-            # the views can be made writeable explicitly, as the base is
-            # writeable (writing to a broadcast view is a bad idea though)
+            # resets the warn_on_write DeprecationWarning
             result.flags.writeable = True
-            assert result.flags.writeable
+            # check: no warning emitted
+            assert_equal(result.flags.writeable, True)
             result[:] = 0
 
     # keep readonly input readonly
     original.flags.writeable = False
     _, result = broadcast_arrays(0, original)
-    assert not result.flags.writeable
+    assert_equal(result.flags.writeable, False)
 
     # regression test for GH6491
     shape = (2,)
@@ -627,14 +638,23 @@ def test_writeable():
 
 
 def test_writeable_memoryview():
-    # The result of broadcast_arrays exports as a non-writeable memoryview.
+    # The result of broadcast_arrays exports as a non-writeable memoryview
+    # because otherwise there is no good way to opt in to the new behaviour
+    # (i.e. you would need to set writeable to False explicitly).
     # See gh-13929.
     original = np.array([1, 2, 3])
 
-    for results in [broadcast_arrays(original,),
-                    broadcast_arrays(0, original)]:
-        for result in results:
-            assert memoryview(result).readonly
+    test_cases = [((False, ), broadcast_arrays(original,)),
+                  ((True, False), broadcast_arrays(0, original))]
+    for is_broadcast, results in test_cases:
+        for array_is_broadcast, result in zip(is_broadcast, results):
+            # This will change to False in a future version
+            if array_is_broadcast:
+                # memoryview(result, writable=True) will give warning but cannot
+                # be tested using the python API.
+                assert memoryview(result).readonly
+            else:
+                assert not memoryview(result).readonly
 
 
 def test_broadcast_arrays_no_args():
@@ -649,7 +669,6 @@ def test_broadcast_arrays_none(subok):
     assert b.dtype == object
     assert b.shape == (3,)
     assert b[0] is None
-    assert b.flags.writeable is False
     assert_array_equal(a, np.zeros(3))
 
     b, a = broadcast_arrays(None, np.zeros((2, 3)), subok=subok)
@@ -677,7 +696,6 @@ def test_broadcast_arrays_many_args(subok):
     expected = broadcast_arrays(*args[:63], b, subok=subok)
     for i, result in enumerate(results):
         assert result.shape == (2, 3)
-        assert result.flags.writeable is False
         assert_array_equal(result, np.broadcast_to(args[i], (2, 3)))
         if i < 63:
             assert result.strides == expected[i].strides
@@ -692,10 +710,13 @@ def test_broadcast_arrays_many_args(subok):
     else:
         assert type(results[0]) is np.ndarray
     assert type(results[70]) is np.ndarray
+    # the broadcast views are writeable, but writing to them warns
+    with pytest.warns(DeprecationWarning):
+        results[71][...] = 5
 
     # 0-d results and zero-sized results
     results = broadcast_arrays(*([1] * 65), subok=subok)
-    assert all(r.shape == () and r.flags.writeable is False for r in results)
+    assert all(r.shape == () and r.flags.writeable for r in results)
     results = broadcast_arrays(np.zeros((0, 3)), *([a] * 64), subok=subok)
     assert all(r.shape == (0, 3) for r in results)
 

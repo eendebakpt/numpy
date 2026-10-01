@@ -603,14 +603,17 @@ def broadcast_arrays(*args, subok=False):
     Returns
     -------
     broadcasted : tuple of arrays
-        These arrays are read-only views on the original arrays.  They are
-        typically not contiguous.  Furthermore, more than one element of a
+        These arrays are views on the original arrays.  They are typically
+        not contiguous.  Furthermore, more than one element of a
         broadcasted array may refer to a single memory location. If you need
-        to write to the arrays, make copies first.
+        to write to the arrays, make copies first. While you can set the
+        ``writable`` flag True, writing to a single output value may end up
+        changing more than one location in the output array.
 
-        .. versionchanged:: 2.6.0
-            The returned arrays are always read-only views, also when no
-            broadcasting was necessary.
+        .. deprecated:: 1.17
+            The output is currently marked so that if written to, a deprecation
+            warning will be emitted. A future version will set the
+            ``writable`` flag False so writing to it will raise an error.
 
     See Also
     --------
@@ -639,10 +642,17 @@ def broadcast_arrays(*args, subok=False):
             [5, 5, 5]])]
 
     """
-    arrays = [np.asarray(_m) for _m in args]
-    if 0 < len(arrays) < 65:
-        # Fast path: a single nditer handles up to NPY_MAXARGS (64) operands
-        # (but requires at least one, hence the ``0 <``).
+    if subok:
+        arrays = [np.asanyarray(_m) for _m in args]
+    else:
+        arrays = [np.asarray(_m) for _m in args]
+
+    if not arrays or all(array.shape == arrays[0].shape for array in arrays):
+        # Nothing to broadcast: the inputs are returned unchanged.
+        return tuple(arrays)
+
+    if len(arrays) < 65:
+        # Fast path: a single nditer handles up to NPY_MAXARGS (64) operands.
         views = np.nditer(arrays, flags=_BROADCAST_ITER_FLAGS, order='C').itviews
     else:
         shape = _broadcast_shape(*arrays)
@@ -653,12 +663,21 @@ def broadcast_arrays(*args, subok=False):
             it = np.nditer(arrays[pos:pos + 64], flags=_BROADCAST_ITER_FLAGS,
                            op_flags=['readonly'], itershape=shape, order='C')
             views.extend(it.itviews)
-        views = tuple(views)
 
-    if subok:
-        # Only ndarray subclasses need to be viewed as the input type; other
-        # inputs were converted to base-class arrays above.
-        views = tuple(_maybe_view_as_subclass(array, view)
-                      if isinstance(array, np.ndarray) else view
-                      for array, view in zip(args, views))
-    return views
+    result = []
+    for array, view in zip(arrays, views):
+        if array.shape == view.shape:
+            # No broadcasting was needed: return the input unchanged (and
+            # writeable, without any warning), as has always been the case.
+            result.append(array)
+            continue
+        if subok:
+            view = _maybe_view_as_subclass(array, view)
+        # The broadcast views stay writeable for backwards compatibility,
+        # but writing to them emits a DeprecationWarning (gh-13929).
+        # In a future version this will go away.
+        if array.flags._writeable_no_warn:
+            view.flags.writeable = True
+            view.flags._warn_on_write = True
+        result.append(view)
+    return tuple(result)
