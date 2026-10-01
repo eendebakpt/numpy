@@ -447,6 +447,9 @@ def sliding_window_view(x, window_shape, axis=None, *,
 # nditer flags used to create broadcast views: `multi_index` prevents nditer
 # from coalescing axes, so the views keep the broadcast shape.
 _BROADCAST_ITER_FLAGS = ['multi_index', 'refs_ok', 'zerosize_ok']
+# `reduce_ok` additionally allows writeable (readwrite) operands to be
+# broadcast, which is needed for the writeable results of broadcast_arrays.
+_BROADCAST_ARRAYS_ITER_FLAGS = _BROADCAST_ITER_FLAGS + ['reduce_ok']
 
 
 def _broadcast_to(array, shape, subok):
@@ -651,21 +654,27 @@ def broadcast_arrays(*args, subok=False):
         # Nothing to broadcast: the inputs are returned unchanged.
         return tuple(arrays)
 
+    # The views of writeable inputs are writeable as well (nditer refuses
+    # the readwrite flag for read-only operands, hence the per-operand flags).
+    op_flags = [['readwrite'] if array.flags._writeable_no_warn else ['readonly']
+                for array in arrays]
     if len(arrays) < 65:
         # Fast path: a single nditer handles up to NPY_MAXARGS (64) operands.
-        views = np.nditer(arrays, flags=_BROADCAST_ITER_FLAGS, order='C').itviews
+        views = np.nditer(arrays, flags=_BROADCAST_ARRAYS_ITER_FLAGS,
+                          op_flags=op_flags, order='C').itviews
     else:
         shape = _broadcast_shape(*arrays)
-        # Create the views in chunks of at most NPY_MAXARGS operands. The
-        # views are read-only, exactly like the ones returned by the fast path.
+        # Create the views in chunks of at most NPY_MAXARGS operands.
         views = []
         for pos in range(0, len(arrays), 64):
-            it = np.nditer(arrays[pos:pos + 64], flags=_BROADCAST_ITER_FLAGS,
-                           op_flags=['readonly'], itershape=shape, order='C')
+            it = np.nditer(arrays[pos:pos + 64],
+                           flags=_BROADCAST_ARRAYS_ITER_FLAGS,
+                           op_flags=op_flags[pos:pos + 64],
+                           itershape=shape, order='C')
             views.extend(it.itviews)
 
     result = []
-    for array, view in zip(arrays, views):
+    for array, view, flags in zip(arrays, views, op_flags):
         if array.shape == view.shape:
             # No broadcasting was needed: return the input unchanged (and
             # writeable, without any warning), as has always been the case.
@@ -676,8 +685,7 @@ def broadcast_arrays(*args, subok=False):
         # The broadcast views stay writeable for backwards compatibility,
         # but writing to them emits a DeprecationWarning (gh-13929).
         # In a future version this will go away.
-        if array.flags._writeable_no_warn:
-            view.flags.writeable = True
+        if flags[0] == 'readwrite':
             view.flags._warn_on_write = True
         result.append(view)
     return tuple(result)
