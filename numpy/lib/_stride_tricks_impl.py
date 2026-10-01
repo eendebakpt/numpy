@@ -446,10 +446,10 @@ def sliding_window_view(x, window_shape, axis=None, *,
 
 # nditer flags used to create broadcast views: `multi_index` prevents nditer
 # from coalescing axes, so the views keep the broadcast shape.
-_BROADCAST_ITER_FLAGS = ['multi_index', 'refs_ok', 'zerosize_ok']
+_BROADCAST_ITER_FLAGS = ('multi_index', 'refs_ok', 'zerosize_ok')
 # `reduce_ok` additionally allows writeable (readwrite) operands to be
 # broadcast, which is needed for the writeable results of broadcast_arrays.
-_BROADCAST_ARRAYS_ITER_FLAGS = _BROADCAST_ITER_FLAGS + ['reduce_ok']
+_BROADCAST_ARRAYS_ITER_FLAGS = _BROADCAST_ITER_FLAGS + ('reduce_ok',)
 
 
 def _broadcast_to(array, shape, subok):
@@ -460,9 +460,8 @@ def _broadcast_to(array, shape, subok):
     if any(size < 0 for size in shape):
         raise ValueError('all elements of broadcast shape must be non-'
                          'negative')
-    extras = []
     it = np.nditer(
-        (array,), flags=['multi_index', 'refs_ok', 'zerosize_ok'] + extras,
+        (array,), flags=_BROADCAST_ITER_FLAGS,
         op_flags=['readonly'], itershape=shape, order='C')
     with it:
         # never really has writebackifcopy semantics
