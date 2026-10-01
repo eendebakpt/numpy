@@ -444,7 +444,12 @@ def sliding_window_view(x, window_shape, axis=None, *,
                       subok=subok, writeable=writeable)
 
 
-def _broadcast_to(array, shape, subok, readonly):
+# nditer flags used to create broadcast views: `multi_index` prevents nditer
+# from coalescing axes, so the views keep the broadcast shape.
+_BROADCAST_ITER_FLAGS = ['multi_index', 'refs_ok', 'zerosize_ok']
+
+
+def _broadcast_to(array, shape, subok):
     shape = tuple(shape) if np.iterable(shape) else (shape,)
     array = np.array(array, copy=None, subok=subok)
     if not shape and array.shape:
@@ -460,10 +465,6 @@ def _broadcast_to(array, shape, subok, readonly):
         # never really has writebackifcopy semantics
         broadcast = it.itviews[0]
     result = _maybe_view_as_subclass(array, broadcast)
-    # In a future version this will go away
-    if not readonly and array.flags._writeable_no_warn:
-        result.flags.writeable = True
-        result.flags._warn_on_write = True
     return result
 
 
@@ -514,7 +515,7 @@ def broadcast_to(array, shape, subok=False):
            [1, 2, 3],
            [1, 2, 3]])
     """
-    return _broadcast_to(array, shape, subok=subok, readonly=True)
+    return _broadcast_to(array, shape, subok=subok)
 
 
 def _broadcast_shape(*args):
@@ -641,16 +642,42 @@ def broadcast_arrays(*args, subok=False):
             [5, 5, 5]])]
 
     """
-    # nditer is not used here to avoid the limit of 64 arrays.
-    # Otherwise, something like the following one-liner would suffice:
-    # return np.nditer(args, flags=['multi_index', 'zerosize_ok'],
-    #                  order='C').itviews
+    if subok:
+        arrays = [np.asanyarray(_m) for _m in args]
+    else:
+        arrays = [np.asarray(_m) for _m in args]
 
-    args = [np.array(_m, copy=None, subok=subok) for _m in args]
+    if not arrays or all(array.shape == arrays[0].shape for array in arrays):
+        # Nothing to broadcast: the inputs are returned unchanged.
+        return tuple(arrays)
 
-    shape = _broadcast_shape(*args)
+    if len(arrays) < 65:
+        # Fast path: a single nditer handles up to NPY_MAXARGS (64) operands.
+        views = np.nditer(arrays, flags=_BROADCAST_ITER_FLAGS, order='C').itviews
+    else:
+        shape = _broadcast_shape(*arrays)
+        # Create the views in chunks of at most NPY_MAXARGS operands. The
+        # views are read-only, exactly like the ones returned by the fast path.
+        views = []
+        for pos in range(0, len(arrays), 64):
+            it = np.nditer(arrays[pos:pos + 64], flags=_BROADCAST_ITER_FLAGS,
+                           op_flags=['readonly'], itershape=shape, order='C')
+            views.extend(it.itviews)
 
-    result = [array if array.shape == shape
-              else _broadcast_to(array, shape, subok=subok, readonly=False)
-                              for array in args]
+    result = []
+    for array, view in zip(arrays, views):
+        if array.shape == view.shape:
+            # No broadcasting was needed: return the input unchanged (and
+            # writeable, without any warning), as has always been the case.
+            result.append(array)
+            continue
+        if subok:
+            view = _maybe_view_as_subclass(array, view)
+        # The broadcast views stay writeable for backwards compatibility,
+        # but writing to them emits a DeprecationWarning (gh-13929).
+        # In a future version this will go away.
+        if array.flags._writeable_no_warn:
+            view.flags.writeable = True
+            view.flags._warn_on_write = True
+        result.append(view)
     return tuple(result)

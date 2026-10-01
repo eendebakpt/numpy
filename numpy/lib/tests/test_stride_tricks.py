@@ -592,9 +592,13 @@ def test_writeable():
     assert_raises(ValueError, result.__setitem__, slice(None), 0)
 
     # but the result of broadcast_arrays needs to be writeable, to
-    # preserve backwards compatibility
+    # preserve backwards compatibility. This holds for the nditer fast path,
+    # the subclass path and the many-arguments path.
     test_cases = [((False,), broadcast_arrays(original,)),
-                  ((True, False), broadcast_arrays(0, original))]
+                  ((True, False), broadcast_arrays(0, original)),
+                  ((True, False), broadcast_arrays(0, original, subok=True)),
+                  ((True,) + (False,) * 64,
+                   broadcast_arrays(0, *[original] * 64))]
     for is_broadcast, results in test_cases:
         for array_is_broadcast, result in zip(is_broadcast, results):
             # This will change to False in a future version
@@ -606,8 +610,9 @@ def test_writeable():
                 # Warning not emitted, writing to the array resets it
                 assert_equal(result.flags.writeable, True)
             else:
-                # No warning:
+                # No warning, the input array is returned unchanged:
                 assert_equal(result.flags.writeable, True)
+                assert result is original
 
     for results in [broadcast_arrays(original),
                     broadcast_arrays(0, original)]:
@@ -650,6 +655,74 @@ def test_writeable_memoryview():
                 assert memoryview(result).readonly
             else:
                 assert not memoryview(result).readonly
+
+
+def test_broadcast_arrays_no_args():
+    assert broadcast_arrays() == ()
+    assert broadcast_arrays(subok=True) == ()
+
+
+@pytest.mark.parametrize("subok", [False, True])
+def test_broadcast_arrays_none(subok):
+    # gh-26214: None must broadcast as a 0-d object array
+    a, b = broadcast_arrays(np.zeros(3), None, subok=subok)
+    assert b.dtype == object
+    assert b.shape == (3,)
+    assert b[0] is None
+    assert_array_equal(a, np.zeros(3))
+
+    b, a = broadcast_arrays(None, np.zeros((2, 3)), subok=subok)
+    assert b.dtype == object
+    assert b.shape == (2, 3)
+    assert b[1, 2] is None
+
+    (b,) = broadcast_arrays(None, subok=subok)
+    assert b.dtype == object
+    assert b.shape == ()
+    assert b[()] is None
+
+
+@pytest.mark.parametrize("subok", [False, True])
+def test_broadcast_arrays_many_args(subok):
+    # A single nditer handles at most 64 operands; more arguments (and
+    # subok=True) use a chunked fallback that must give the same views.
+    a = SimpleSubClass([1, 2, 3])
+    b = np.arange(2).reshape(-1, 1)
+    args = [a] * 70 + [b, np.array(5), 7]
+    results = broadcast_arrays(*args, subok=subok)
+    assert isinstance(results, tuple)
+    assert len(results) == len(args)
+    # the same views as produced by the nditer fast path
+    expected = broadcast_arrays(*args[:63], b, subok=subok)
+    for i, result in enumerate(results):
+        assert result.shape == (2, 3)
+        assert_array_equal(result, np.broadcast_to(args[i], (2, 3)))
+        if i < 63:
+            assert result.strides == expected[i].strides
+            assert type(result) is type(expected[i])
+    assert results[70].strides == (b.strides[0], 0)
+    assert results[71].strides == (0, 0)
+    assert results[72].strides == (0, 0)
+    if subok:
+        assert type(results[0]) is SimpleSubClass
+        assert results[0].info == 'simple finalized'
+        assert type(results[69]) is SimpleSubClass
+    else:
+        assert type(results[0]) is np.ndarray
+    assert type(results[70]) is np.ndarray
+    # the broadcast views are writeable, but writing to them warns
+    with pytest.warns(DeprecationWarning):
+        results[71][...] = 5
+
+    # 0-d results and zero-sized results
+    results = broadcast_arrays(*([1] * 65), subok=subok)
+    assert all(r.shape == () and r.flags.writeable for r in results)
+    results = broadcast_arrays(np.zeros((0, 3)), *([a] * 64), subok=subok)
+    assert all(r.shape == (0, 3) for r in results)
+
+    # shape mismatch
+    with pytest.raises(ValueError, match="cannot be broadcast"):
+        broadcast_arrays(*([a] * 65), np.arange(4), subok=subok)
 
 
 def test_reference_types():
