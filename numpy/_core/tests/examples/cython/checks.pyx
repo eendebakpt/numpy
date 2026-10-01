@@ -394,3 +394,29 @@ def resize_refcheck_test():
     # see gh-30991
     a = np.array([[0, 1], [2, 3]], order='C')
     a.resize((2, 1))
+
+
+def sum_double_memoryview(double[::1] arr):
+    # A non-const (writeable) contiguous memoryview, as used by SciPy on the
+    # results of np.broadcast_arrays (see gh-32819).
+    cdef Py_ssize_t i
+    cdef double total = 0
+    for i in range(arr.shape[0]):
+        total += arr[i]
+    return total
+
+
+def sum_double_strided_memoryview(double[:] arr):
+    cdef Py_ssize_t i
+    cdef double total = 0
+    for i in range(arr.shape[0]):
+        total += arr[i]
+    return total
+
+
+def sum_const_double_strided_memoryview(const double[:] arr):
+    cdef Py_ssize_t i
+    cdef double total = 0
+    for i in range(arr.shape[0]):
+        total += arr[i]
+    return total

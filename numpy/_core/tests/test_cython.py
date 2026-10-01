@@ -3,6 +3,7 @@ import shutil
 import subprocess
 import sys
 import sysconfig
+import warnings
 from datetime import datetime
 
 import pytest
@@ -395,3 +396,37 @@ def test_resize_refcheck(install_temp):
     msg = "It is possible that this is a false positive."
     with pytest.raises(ValueError, match=msg):
         checks.resize_refcheck_test()
+
+
+@pytest.mark.skipif(
+    sysconfig.get_platform() == 'win-arm64',
+    reason='no checks module on win-arm64'
+)
+def test_broadcast_arrays_memoryview(install_temp):
+    # gh-32819: SciPy passes results of np.broadcast_arrays to Cython
+    # functions taking non-const memoryviews, which require a writeable
+    # buffer. Arrays that did not need broadcasting are returned unchanged,
+    # so this works without any warning.
+    import checks
+    a = np.arange(3.)
+    x, y = np.broadcast_arrays(a, np.ones(3))
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        assert checks.sum_double_memoryview(x) == 3.0
+        assert checks.sum_double_memoryview(y) == 3.0
+
+    # Requesting a writeable buffer from a broadcast view emits the
+    # DeprecationWarning (since 1.17); a const memoryview does not.
+    _, z = np.broadcast_arrays(a, 2.0)
+    assert z.strides == (0,)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        # a plain memoryview is read-only, see gh-13929
+        assert memoryview(z).readonly
+        assert checks.sum_const_double_strided_memoryview(z) == 6.0
+    with pytest.warns(DeprecationWarning, match="broadcast_arrays"):
+        assert checks.sum_double_strided_memoryview(z) == 6.0
+    # the warning is only given once; the buffer is writeable afterwards
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        assert checks.sum_double_strided_memoryview(z) == 6.0
