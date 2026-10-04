@@ -158,6 +158,35 @@ def zeros_like(
     array([0.,  0.,  0.])
 
     """
+    # Fast path: when the result is a base-class ndarray in C or Fortran
+    # order, `zeros` can allocate it already zeroed (via calloc) instead of
+    # allocating uninitialized memory and then writing every element.
+    arr = a if isinstance(a, ndarray) else asanyarray(a)
+    if not subok or type(arr) is ndarray:
+        if shape is None:
+            ndim = arr.ndim
+        else:
+            try:
+                ndim = len(shape)
+            except TypeError:
+                ndim = 1  # a single integer
+        # Mirror the order resolution of `empty_like` (PyArray_NewLikeArray)
+        if order == 'K' or order == 'k':
+            if ndim != arr.ndim or ndim <= 1 or arr.flags.c_contiguous:
+                order = 'C'
+            elif arr.flags.f_contiguous:
+                order = 'F'
+            else:
+                order = None  # general strided layout, handled below
+        elif order == 'A' or order == 'a':
+            order = 'F' if arr.flags.fnc else 'C'
+        if order is not None:
+            return zeros(
+                arr.shape if shape is None else shape,
+                dtype=arr.dtype if dtype is None else dtype,
+                order=order, device=device,
+            )
+
     res = empty_like(
         a, dtype=dtype, order=order, subok=subok, shape=shape, device=device
     )

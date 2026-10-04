@@ -1,0 +1,8 @@
+Faster ``numpy.zeros_like``
+---------------------------
+``numpy.zeros_like`` now allocates zero-initialized memory directly (as
+``numpy.zeros`` does) whenever the result is a base-class ``ndarray`` in C or
+Fortran order, instead of allocating uninitialized memory and filling it. This
+removes the Python-level overhead for small arrays and avoids touching every
+page of large arrays, which is especially noticeable on Windows where a fresh
+large allocation is otherwise paid for at the first write.
