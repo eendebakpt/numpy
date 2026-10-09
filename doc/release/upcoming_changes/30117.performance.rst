@@ -1,0 +1,6 @@
+Faster ``np.vectorize`` calls with keyword arguments
+----------------------------------------------------
+Calling a `numpy.vectorize` wrapped function with keyword arguments that the
+function also accepts positionally no longer goes through a Python-level
+wrapper for every element, making such calls as fast as the positional form
+(up to ~6x faster for large inputs).

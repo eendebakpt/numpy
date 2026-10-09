@@ -1,4 +1,5 @@
 import decimal
+import functools
 import math
 import operator
 import sys
@@ -2092,6 +2093,75 @@ class TestVectorize:
             @np.vectorize("string")
             def foo():
                 return "bar"
+
+    def test_keywords_passed_positionally(self):
+        # gh-30116: keyword arguments that the function accepts positionally
+        # are forwarded positionally, so the ufunc for `pyfunc` itself is
+        # created (and, with `otypes`, cached) rather than a wrapper.
+        def foo(a, b, c=10):
+            return a + b + c
+
+        f = vectorize(foo, otypes=[int])
+        assert_array_equal(f(np.arange(3), b=1), [11, 12, 13])
+        assert_array_equal(f(b=1, a=np.arange(3)), [11, 12, 13])
+        assert_array_equal(f(np.arange(3), b=1, c=np.arange(3)), [1, 3, 5])
+        assert f._ufunc.keys() == {2, 3}
+
+    def test_keywords_positional_only(self):
+        def foo(a, b, /, c):
+            return a + b + c
+
+        f = vectorize(foo)
+        assert_array_equal(f(np.arange(3), 1, c=2), [3, 4, 5])
+        with pytest.raises(TypeError):
+            f(np.arange(3), b=1, c=2)
+
+    def test_keywords_keyword_only(self):
+        def foo(a, *, b):
+            return a + b
+
+        f = vectorize(foo)
+        assert_array_equal(f(np.arange(3), b=1), [1, 2, 3])
+
+    def test_keywords_unexpected(self):
+        def foo(a, b=1):
+            return a + b
+
+        f = vectorize(foo)
+        with pytest.raises(TypeError):
+            f(np.arange(3), b=1, c=2)
+        with pytest.raises(TypeError):
+            f(np.arange(3), 1, b=2)
+
+    def test_keywords_default_not_vectorized(self):
+        # A default value is not an argument of the ufunc, so that e.g. a
+        # sequence default is not iterated over.
+        def foo(a, b=1, weights=(1, 2, 3)):
+            return a + b + len(weights)
+
+        f = vectorize(foo)
+        assert_array_equal(f(np.arange(3), b=1), [4, 5, 6])
+        assert_array_equal(f(a=np.arange(3)), [4, 5, 6])
+
+    def test_keywords_wrapped_function(self):
+        # The signature of a wrapper is used, not that of the wrapped function
+        def with_bonus(func):
+            @functools.wraps(func)
+            def wrapper(*args, **kwargs):
+                return func(*args, **kwargs) + (100 if "b" in kwargs else 0)
+            return wrapper
+
+        @with_bonus
+        def foo(a, b=1):
+            return a + b
+
+        f = vectorize(foo)
+        assert_array_equal(f(np.arange(3), b=1), [101, 102, 103])
+        assert_array_equal(f(np.arange(3), 1), [1, 2, 3])
+
+    def test_keywords_builtin(self):
+        f = vectorize(pow)
+        assert_array_equal(f(np.arange(3), exp=2), [0, 1, 4])
 
     def test_positional_regression_9477(self):
         # This supplies the first keyword argument as a positional,

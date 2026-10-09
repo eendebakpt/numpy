@@ -1,6 +1,7 @@
 import builtins
 import collections.abc
 import functools
+import inspect
 import math
 import operator
 import re
@@ -2484,6 +2485,7 @@ class vectorize:
             self.__name__ = pyfunc.__name__
 
         self._ufunc = {}    # Caching to improve default performance
+        self._pyfunc_signature = np._NoValue  # Computed lazily
         self._doc = None
         self.__doc__ = doc
         if doc is None and hasattr(pyfunc, '__doc__'):
@@ -2514,6 +2516,7 @@ class vectorize:
     def _init_stage_2(self, pyfunc, *args, **kwargs):
         self.__name__ = pyfunc.__name__
         self.pyfunc = pyfunc
+        self._pyfunc_signature = np._NoValue
         if self._doc is None:
             self.__doc__ = pyfunc.__doc__
         else:
@@ -2525,6 +2528,22 @@ class vectorize:
         `args` and `kwargs` not in `excluded`.
         """
         excluded = self.excluded
+        if kwargs and not excluded:
+            # Keyword arguments that `pyfunc` also accepts positionally are
+            # passed positionally, so that `pyfunc` can be vectorized directly
+            # instead of through the (much slower) wrapper below.  Defaults
+            # are not filled in, and if the arguments cannot be bound, or some
+            # of them have to remain keywords, the wrapper is used as before.
+            sig = self._get_pyfunc_signature()
+            if sig is not None:
+                try:
+                    bound = sig.bind(*args, **kwargs)
+                except TypeError:
+                    pass
+                else:
+                    if not bound.kwargs:
+                        args, kwargs = bound.args, {}
+
         if not kwargs and not excluded:
             func = self.pyfunc
             vargs = args
@@ -2548,6 +2567,19 @@ class vectorize:
             vargs.extend([kwargs[_n] for _n in names])
 
         return self._vectorize_call(func=func, args=vargs)
+
+    def _get_pyfunc_signature(self):
+        """Return the `inspect.Signature` of `pyfunc`, or None if unavailable."""
+        sig = self._pyfunc_signature
+        if sig is np._NoValue:
+            try:
+                # A wrapper may treat keyword arguments differently than the
+                # function it wraps, so do not look through `__wrapped__`.
+                sig = inspect.signature(self.pyfunc, follow_wrapped=False)
+            except (TypeError, ValueError):
+                sig = None
+            self._pyfunc_signature = sig
+        return sig
 
     def __call__(self, *args, **kwargs):
         if self.pyfunc is np._NoValue:
