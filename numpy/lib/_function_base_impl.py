@@ -1,6 +1,7 @@
 import builtins
 import collections.abc
 import functools
+import keyword
 import math
 import operator
 import re
@@ -2303,6 +2304,11 @@ def _get_vectorize_dtype(dtype):
     return dtype
 
 
+@functools.lru_cache(maxsize=256)
+def _compile_vectorize_wrapper(source):
+    return compile(source, "<np.vectorize wrapper>", "eval")
+
+
 @set_module('numpy')
 class vectorize:
     """
@@ -2524,30 +2530,59 @@ class vectorize:
         Return arrays with the results of `pyfunc` broadcast (vectorized) over
         `args` and `kwargs` not in `excluded`.
         """
-        excluded = self.excluded
-        if not kwargs and not excluded:
+        if not kwargs and not self.excluded:
             func = self.pyfunc
             vargs = args
         else:
-            # The wrapper accepts only positional arguments: we use `names` and
-            # `inds` to mutate `the_args` and `kwargs` to pass to the original
-            # function.
-            nargs = len(args)
-
-            names = [_n for _n in kwargs if _n not in excluded]
-            inds = [_i for _i in range(nargs) if _i not in excluded]
-            the_args = list(args)
-
-            def func(*vargs):
-                for _n, _i in enumerate(inds):
-                    the_args[_i] = vargs[_n]
-                kwargs.update(zip(names, vargs[len(inds):]))
-                return self.pyfunc(*the_args, **kwargs)
-
-            vargs = [args[_i] for _i in inds]
-            vargs.extend([kwargs[_n] for _n in names])
+            func, vargs = self._make_wrapper(args, kwargs)
 
         return self._vectorize_call(func=func, args=vargs)
+
+    def _make_wrapper(self, args, kwargs):
+        """
+        Return ``(func, vargs)`` where ``func`` is a function of the
+        non-excluded arguments ``vargs`` that calls `pyfunc` with them in
+        their original positional or keyword position, together with the
+        excluded arguments.
+
+        The wrapper is generated as source code so that it calls `pyfunc`
+        with ordinary positional and keyword arguments: a generic
+        ``pyfunc(*args, **kwargs)`` wrapper is several times slower per
+        element.  The source only depends on the number of positional and the
+        names of the keyword arguments, so compiled wrappers are cached.
+        """
+        excluded = self.excluded
+        namespace = {"pyfunc": self.pyfunc}
+        params = []
+        call = []
+        vargs = []
+        for i, arg in enumerate(args):
+            if i in excluded:
+                namespace[f"_e{i}"] = arg
+                call.append(f"_e{i}")
+            else:
+                params.append(f"_p{i}")
+                call.append(f"_p{i}")
+                vargs.append(arg)
+        kwcall = []
+        for j, (name, arg) in enumerate(kwargs.items()):
+            if name in excluded:
+                namespace[f"_ek{j}"] = arg
+                value = f"_ek{j}"
+            else:
+                params.append(f"_k{j}")
+                value = f"_k{j}"
+                vargs.append(arg)
+            if name.isidentifier() and not keyword.iskeyword(name):
+                call.append(f"{name}={value}")
+            else:
+                # Only possible if `pyfunc` takes ``**kwargs``
+                kwcall.append(f"{name!r}: {value}")
+        if kwcall:
+            call.append("**{" + ", ".join(kwcall) + "}")
+
+        source = f"lambda {', '.join(params)}: pyfunc({', '.join(call)})"
+        return eval(_compile_vectorize_wrapper(source), namespace), vargs
 
     def __call__(self, *args, **kwargs):
         if self.pyfunc is np._NoValue:

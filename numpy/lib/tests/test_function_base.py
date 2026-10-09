@@ -1,4 +1,5 @@
 import decimal
+import functools
 import math
 import operator
 import sys
@@ -2092,6 +2093,95 @@ class TestVectorize:
             @np.vectorize("string")
             def foo():
                 return "bar"
+
+    def test_keywords_mixed(self):
+        # gh-30116
+        def foo(a, b, c=10):
+            return a + b + c
+
+        f = vectorize(foo, otypes=[int])
+        assert_array_equal(f(np.arange(3), b=1), [11, 12, 13])
+        assert_array_equal(f(b=1, a=np.arange(3)), [11, 12, 13])
+        assert_array_equal(f(np.arange(3), b=1, c=np.arange(3)), [1, 3, 5])
+        assert_array_equal(f(np.arange(3), c=1, b=np.arange(3)), [1, 3, 5])
+
+    def test_keywords_unusual_names(self):
+        # Keyword names that are not identifiers, or are Python keywords, are
+        # only possible for functions taking **kwargs.
+        def foo(a, **kwargs):
+            return a + kwargs["x-y"] + kwargs["lambda"]
+
+        f = vectorize(foo)
+        assert_array_equal(f(np.arange(3), **{"x-y": 1, "lambda": 10}),
+                           [11, 12, 13])
+        f = vectorize(foo, excluded={"lambda"})
+        assert_array_equal(f(np.arange(3), **{"x-y": 1, "lambda": 10}),
+                           [11, 12, 13])
+
+    def test_keywords_excluded_mixed(self):
+        def foo(a, b, c, d=0):
+            return a + len(b) + c + len(d)
+
+        f = vectorize(foo, excluded={1, "d"})
+        assert_array_equal(f(np.arange(3), [1, 2], 3, d=[1]), [6, 7, 8])
+        assert_array_equal(f(np.arange(3), [1, 2], c=3, d=[1]), [6, 7, 8])
+        assert_array_equal(f(np.arange(3), [1, 2], d=[1], c=3), [6, 7, 8])
+
+    def test_keywords_positional_only(self):
+        def foo(a, b, /, c):
+            return a + b + c
+
+        f = vectorize(foo)
+        assert_array_equal(f(np.arange(3), 1, c=2), [3, 4, 5])
+        with pytest.raises(TypeError):
+            f(np.arange(3), b=1, c=2)
+
+    def test_keywords_keyword_only(self):
+        def foo(a, *, b):
+            return a + b
+
+        f = vectorize(foo)
+        assert_array_equal(f(np.arange(3), b=1), [1, 2, 3])
+
+    def test_keywords_unexpected(self):
+        def foo(a, b=1):
+            return a + b
+
+        f = vectorize(foo)
+        with pytest.raises(TypeError):
+            f(np.arange(3), b=1, c=2)
+        with pytest.raises(TypeError):
+            f(np.arange(3), 1, b=2)
+
+    def test_keywords_default_not_vectorized(self):
+        # A default value is not an argument of the ufunc, so that e.g. a
+        # sequence default is not iterated over.
+        def foo(a, b=1, weights=(1, 2, 3)):
+            return a + b + len(weights)
+
+        f = vectorize(foo)
+        assert_array_equal(f(np.arange(3), b=1), [4, 5, 6])
+        assert_array_equal(f(a=np.arange(3)), [4, 5, 6])
+
+    def test_keywords_wrapped_function(self):
+        # The signature of a wrapper is used, not that of the wrapped function
+        def with_bonus(func):
+            @functools.wraps(func)
+            def wrapper(*args, **kwargs):
+                return func(*args, **kwargs) + (100 if "b" in kwargs else 0)
+            return wrapper
+
+        @with_bonus
+        def foo(a, b=1):
+            return a + b
+
+        f = vectorize(foo)
+        assert_array_equal(f(np.arange(3), b=1), [101, 102, 103])
+        assert_array_equal(f(np.arange(3), 1), [1, 2, 3])
+
+    def test_keywords_builtin(self):
+        f = vectorize(pow)
+        assert_array_equal(f(np.arange(3), exp=2), [0, 1, 4])
 
     def test_positional_regression_9477(self):
         # This supplies the first keyword argument as a positional,
