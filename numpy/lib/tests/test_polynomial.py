@@ -332,61 +332,52 @@ class TestPolynomial:
         # APIs
         assert_raises(AttributeError, setattr, p, 'coeffs', np.array(1))
 
-    def test_polyval_return_types(self):
-        v = np.polyval(np.array([5.], dtype=np.float32), 5.0)
-        assert_equal(v.dtype, np.float32)
+    @pytest.mark.parametrize("p, x, expected_dtype", [
+        # Python scalars are "weak" (NEP 50): the coefficient dtype is kept
+        (np.array([5.], dtype=np.float32), 5.0, np.float32),
+        (np.array([5.], dtype=np.float16), 5.0, np.float16),
+        (np.array([5.], dtype=np.float16), 1, np.float16),
+        (np.array([1, 2], dtype=np.int8), 3, np.int8),
+        (np.array([1, 2], dtype=np.int8), 2.5, np.float64),
+        (np.array([1, 2]), 1 + 2j, np.complex128),
+        (np.array([1, 1 + 2j]), 1, np.complex128),
+        (np.poly1d(np.array([3, 0, 1], dtype=np.float32)), 0.5, np.float32),
+        # NumPy scalars and arrays promote with the coefficients
+        (np.array([5.], dtype=np.float16), np.float64(1), np.float64),
+        ([5.], np.float16(5.0), np.float64),
+        (np.array([1, 2], dtype=np.int16),
+         np.array([1, 2], dtype=np.float32), np.float32),
+        (np.array([1, 2], dtype=np.int8),
+         np.array([1, 2], dtype=np.int8), np.int8),
+        # lists are converted to arrays first, so they are not weak
+        (np.array([1], dtype=np.float32), [5, 1], np.float64),
+        # the result dtype does not depend on the number of coefficients
+        (np.array([], dtype=np.float32), 5.0, np.float32),
+        (np.array([], dtype=np.float16), [5.0, 2.0], np.float64),
+        ([], [1, 2], np.float64),
+    ])
+    def test_polyval_dtype(self, p, x, expected_dtype):
+        v = np.polyval(p, x)
+        assert v.dtype == expected_dtype
+        assert v.shape == np.shape(x)
+        expected = np.polyval(np.asarray(p, dtype=np.complex128),
+                              np.asarray(x, dtype=np.complex128))
+        assert_allclose(v, expected)
 
-        v = np.polyval(np.array([5.], dtype=np.float16), 5.0)
-        assert_equal(v.dtype, np.float16)
-
-        v = np.polyval(np.array([5.], dtype=np.float16), 1)
-        assert_equal(v.dtype, np.float16)
-
-        v = np.polyval(np.array([5.], dtype=np.float16), np.float64(1))
-        assert_equal(v.dtype, np.float64)
-
-        v = np.polyval([5.], np.float16(5.0))
-        assert_equal(v.dtype, np.float64)
-
-        v = np.polyval(np.array([], dtype=np.float32), 5.0)
-        assert_equal(v.dtype, np.float32)
+    def test_polyval_scalar_result(self):
+        # a Python scalar `x` gives a NumPy scalar, not a 0-d array
+        v = np.polyval(np.array([3, 0, 1], dtype=np.float32), 5.0)
         assert np.isscalar(v)
+        assert v == np.float32(76)
 
-        v = np.polyval([], [1, 2])
-        assert_equal(v.dtype, np.float64)
-
-        p = np.array([], dtype=np.float16)
-        v = np.polyval(p, 1)
-        assert v.dtype == p.dtype
-
-        p = np.array([1, 2], dtype=np.float16)
-        v = np.polyval(p, 1)
-        assert v.dtype == p.dtype
-
-        p = np.array([1, 2], dtype=np.int16)
-        q = np.array([1, 2], dtype=np.float32)
-        v = np.polyval(p, q)
-        assert v.dtype == np.float32
-
-        p = np.array([1, 2], dtype=np.int8)
-        q = np.array([1, 2], dtype=np.int8)
-        v = np.polyval(p, q)
-        assert v.dtype == np.int8
-
-        p = np.array([1, 2])
-        v = np.polyval(p, 1+2j)
-        assert v.dtype == np.complex128
-
-        p = np.array([1, 1+2j])
-        v = np.polyval(p, 1)
-        assert v.dtype == np.complex128
-
+    def test_polyval_poly1d_result(self):
         p = np.poly1d([1, 2])
         q = np.poly1d([1, 2])
         v = np.polyval(p, q)
         assert isinstance(v, np.poly1d)
+        assert_equal(v.coeffs, [1, 4])
 
         p = np.array([1, 2])
-        q = np.poly1d([1, 2])
         v = np.polyval(p, q)
         assert isinstance(v, np.poly1d)
+        assert_equal(v.coeffs, [1, 4])

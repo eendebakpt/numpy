@@ -760,6 +760,10 @@ def polyval(p, x):
 
     If `x` is a subtype of `ndarray` the return value will be of the same type.
 
+    The dtype of the result follows the usual promotion rules for `p` and `x`,
+    including the weak promotion of Python scalars (see :ref:`NEP 50
+    <NEP50>`): ``np.polyval(np.float32([3, 0, 1]), 5.0)`` returns a float32.
+
     References
     ----------
     .. [1] I. N. Bronshtein, K. A. Semendyayev, and K. A. Hirsch (Eng.
@@ -780,22 +784,16 @@ def polyval(p, x):
 
     """
     p = NX.asarray(p)
-    y = NX.zeros_like(x)
-
-    # When x is not complex, cast y to p dtype
-    if not iscomplexobj(y):
-        y = y.astype(p.dtype)
-
-    if not isinstance(x, (poly1d, float, int, complex)):
-        x = NX.asanyarray(x)
-    else:
-        # Special case for scalar or poly1d `x`
-        y = NX.int32(0).astype(p.dtype)
-
-    # Special case for multiplying two polynomials
     if isinstance(x, poly1d):
-        y = poly1d(y)
-
+        y = 0
+    else:
+        # Python scalars are kept as-is, so that NEP 50 weak promotion
+        # applies: ``polyval(float32_coefficients, 2.0)`` gives a float32.
+        if not isinstance(x, (int, float, complex)):
+            x = NX.asanyarray(x)
+        # The accumulator uses the promoted dtype of `p` and `x` from the
+        # start, so the result dtype does not depend on the length of `p`.
+        y = NX.zeros_like(x, dtype=NX.result_type(p, x))
     for pv in p:
         y = y * x + pv
     return y

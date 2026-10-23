@@ -1,0 +1,9 @@
+``np.polyval`` follows NEP 50 promotion rules for Python scalars
+----------------------------------------------------------------
+A Python scalar passed as ``x`` to `numpy.polyval` is no longer converted to a
+default-precision array first, so the weak promotion rules of :ref:`NEP 50
+<NEP50>` now apply: ``np.polyval(np.float32([1, 2]), 2.0)`` returns a
+``float32`` instead of a ``float64``. The result dtype no longer depends on
+the number of coefficients either, so ``np.polyval(np.float32([]), 2.0)`` is a
+``float32`` zero. As with other NumPy operations, a Python integer that does
+not fit the integer dtype of the coefficients now raises an ``OverflowError``.
