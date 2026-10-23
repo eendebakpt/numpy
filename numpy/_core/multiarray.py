@@ -7,17 +7,24 @@ namespace by importing from the extension module.
 """
 
 import functools
-from . import overrides
-from . import _multiarray_umath
-from ._multiarray_umath import *  # noqa: F403
+
+from . import _multiarray_umath, overrides
+from ._multiarray_umath import *
+
 # These imports are needed for backward compatibility,
 # do not change them. issue gh-15518
 # _get_ndarray_c_version is semi-public, on purpose not added to __all__
-from ._multiarray_umath import (
-    _flagdict, from_dlpack, _place, _reconstruct,
-    _vec_string, _ARRAY_API, _monotonicity, _get_ndarray_c_version,
-    _get_madvise_hugepage, _set_madvise_hugepage,
-    )
+from ._multiarray_umath import (  # noqa: F401
+    _ARRAY_API,
+    _flagdict,
+    _get_madvise_hugepage,
+    _get_ndarray_c_version,
+    _place,
+    _reconstruct,
+    _set_madvise_hugepage,
+    _vec_string,
+    from_dlpack,
+)
 
 __all__ = [
     '_ARRAY_API', 'ALLOW_THREADS', 'BUFSIZE', 'CLIP', 'DATETIMEUNITS',
@@ -25,7 +32,7 @@ __all__ = [
     'MAY_SHARE_BOUNDS', 'MAY_SHARE_EXACT', 'NEEDS_INIT', 'NEEDS_PYAPI',
     'RAISE', 'USE_GETITEM', 'USE_SETITEM', 'WRAP',
     '_flagdict', 'from_dlpack', '_place', '_reconstruct', '_vec_string',
-    '_monotonicity', 'add_docstring', 'arange', 'array', 'asarray',
+    'add_docstring', 'arange', 'array', 'asarray',
     'asanyarray', 'ascontiguousarray', 'asfortranarray', 'bincount',
     'broadcast', 'busday_count', 'busday_offset', 'busdaycalendar', 'can_cast',
     'compare_chararrays', 'concatenate', 'copyto', 'correlate', 'correlate2',
@@ -66,6 +73,35 @@ nested_iters.__module__ = 'numpy'
 promote_types.__module__ = 'numpy'
 zeros.__module__ = 'numpy'
 normalize_axis_index.__module__ = 'numpy.lib.array_utils'
+add_docstring.__module__ = 'numpy.lib'
+compare_chararrays.__module__ = 'numpy.char'
+
+
+def _override___module__():
+    namespace_names = globals()
+    for ufunc_name in [
+        'absolute', 'arccos', 'arccosh', 'add', 'arcsin', 'arcsinh', 'arctan',
+        'arctan2', 'arctanh', 'bitwise_and', 'bitwise_count', 'invert',
+        'left_shift', 'bitwise_or', 'right_shift', 'bitwise_xor', 'cbrt',
+        'ceil', 'conjugate', 'copysign', 'cos', 'cosh', 'deg2rad', 'degrees',
+        'divide', 'divmod', 'equal', 'exp', 'exp2', 'expm1', 'fabs',
+        'float_power', 'floor', 'floor_divide', 'fmax', 'fmin', 'fmod',
+        'frexp', 'gcd', 'greater', 'greater_equal', 'heaviside', 'hypot',
+        'isfinite', 'isinf', 'isnan', 'isnat', 'lcm', 'ldexp', 'less',
+        'less_equal', 'log', 'log10', 'log1p', 'log2', 'logaddexp',
+        'logaddexp2', 'logical_and', 'logical_not', 'logical_or',
+        'logical_xor', 'matmul', 'matvec', 'maximum', 'minimum', 'remainder',
+        'modf', 'multiply', 'negative', 'nextafter', 'not_equal', 'positive',
+        'power', 'rad2deg', 'radians', 'reciprocal', 'rint', 'sign', 'signbit',
+        'sin', 'sinh', 'spacing', 'sqrt', 'square', 'subtract', 'tan', 'tanh',
+        'trunc', 'vecdot', 'vecmat',
+    ]:
+        ufunc = namespace_names[ufunc_name]
+        ufunc.__module__ = "numpy"
+        ufunc.__qualname__ = ufunc_name
+
+
+_override___module__()
 
 
 # We can't verify dispatcher signatures because NumPy's C functions don't
@@ -77,11 +113,20 @@ array_function_from_c_func_and_dispatcher = functools.partial(
 
 @array_function_from_c_func_and_dispatcher(_multiarray_umath.empty_like)
 def empty_like(
-    prototype, dtype=None, order=None, subok=None, shape=None, *, device=None
+    prototype, dtype=None, order="K", subok=True, shape=None, *, device=None
 ):
     """
-    empty_like(prototype, dtype=None, order='K', subok=True, shape=None, *,
-               device=None)
+    empty_like(
+        prototype,
+        /,
+        dtype=None,
+        order='K',
+        subok=True,
+        shape=None,
+        *,
+        device=None,
+    )
+    --
 
     Return a new array with the same shape and type as a given array.
 
@@ -92,15 +137,11 @@ def empty_like(
         of the returned array.
     dtype : data-type, optional
         Overrides the data type of the result.
-
-        .. versionadded:: 1.6.0
     order : {'C', 'F', 'A', or 'K'}, optional
         Overrides the memory layout of the result. 'C' means C-order,
         'F' means F-order, 'A' means 'F' if `prototype` is Fortran
         contiguous, 'C' otherwise. 'K' means match the layout of `prototype`
         as closely as possible.
-
-        .. versionadded:: 1.6.0
     subok : bool, optional.
         If True, then the newly created array will use the sub-class
         type of `prototype`, otherwise it will be a base-class array. Defaults
@@ -109,8 +150,6 @@ def empty_like(
         Overrides the shape of the result. If order='K' and the number of
         dimensions is unchanged, will try to keep order, otherwise,
         order='C' is implied.
-
-        .. versionadded:: 1.17.0
     device : str, optional
         The device on which to place the created array. Default: None.
         For Array-API interoperability only, so must be ``"cpu"`` if passed.
@@ -150,22 +189,28 @@ def empty_like(
     array([[ -2.00000715e+000,   1.48219694e-323,  -2.00000572e+000], # uninitialized
            [  4.38791518e-305,  -2.00000715e+000,   4.17269252e-309]])
 
-    """   # NOQA
+    """
     return (prototype,)
 
 
 @array_function_from_c_func_and_dispatcher(_multiarray_umath.concatenate)
-def concatenate(arrays, axis=None, out=None, *, dtype=None, casting=None):
+def concatenate(arrays, axis=0, out=None, *, dtype=None, casting="same_kind"):
     """
     concatenate(
-        (a1, a2, ...),
+        arrays,
+        /,
         axis=0,
         out=None,
+        *,
         dtype=None,
-        casting="same_kind"
+        casting="same_kind",
     )
+    --
 
     Join a sequence of arrays along an existing axis.
+
+    .. versionadded:: 2.0
+        ``numpy.concat`` added as a shorthand for ``numpy.concatenate``.
 
     Parameters
     ----------
@@ -264,7 +309,7 @@ def concatenate(arrays, axis=None, out=None, *, dtype=None, casting=None):
 
 
 @array_function_from_c_func_and_dispatcher(_multiarray_umath.inner)
-def inner(a, b):
+def inner(a, b, /):
     """
     inner(a, b, /)
 
@@ -358,7 +403,7 @@ def inner(a, b):
 
 
 @array_function_from_c_func_and_dispatcher(_multiarray_umath.where)
-def where(condition, x=None, y=None):
+def where(condition, x=None, y=None, /):
     """
     where(condition, [x, y], /)
 
@@ -434,7 +479,7 @@ def where(condition, x=None, y=None):
 
 
 @array_function_from_c_func_and_dispatcher(_multiarray_umath.lexsort)
-def lexsort(keys, axis=None):
+def lexsort(keys, axis=-1):
     """
     lexsort(keys, axis=-1)
 
@@ -555,7 +600,7 @@ def lexsort(keys, axis=None):
 
 
 @array_function_from_c_func_and_dispatcher(_multiarray_umath.can_cast)
-def can_cast(from_, to, casting=None):
+def can_cast(from_, to, casting="safe"):
     """
     can_cast(from_, to, casting='safe')
 
@@ -585,16 +630,6 @@ def can_cast(from_, to, casting=None):
 
     Notes
     -----
-    .. versionchanged:: 1.17.0
-       Casting between a simple data type and a structured one is possible only
-       for "unsafe" casting.  Casting to multiple fields is allowed, but
-       casting from multiple fields is not.
-
-    .. versionchanged:: 1.9.0
-       Casting from numeric to string types in 'safe' casting mode requires
-       that the string dtype length is long enough to store the maximum
-       integer/float value converted.
-
     .. versionchanged:: 2.0
        This function does not support Python scalars anymore and does not
        apply any value-based logic for 0-D arrays and NumPy scalars.
@@ -627,7 +662,7 @@ def can_cast(from_, to, casting=None):
 
 
 @array_function_from_c_func_and_dispatcher(_multiarray_umath.min_scalar_type)
-def min_scalar_type(a):
+def min_scalar_type(a, /):
     """
     min_scalar_type(a, /)
 
@@ -648,10 +683,6 @@ def min_scalar_type(a):
     out : dtype
         The minimal data type.
 
-    Notes
-    -----
-    .. versionadded:: 1.6.0
-
     See Also
     --------
     result_type, promote_types, dtype, can_cast
@@ -671,7 +702,7 @@ def min_scalar_type(a):
     >>> np.min_scalar_type(1e50)
     dtype('float64')
 
-    >>> np.min_scalar_type(np.arange(4,dtype='f8'))
+    >>> np.min_scalar_type(np.arange(4, dtype=np.float64))
     dtype('float64')
 
     """
@@ -684,19 +715,7 @@ def result_type(*arrays_and_dtypes):
     result_type(*arrays_and_dtypes)
 
     Returns the type that results from applying the NumPy
-    type promotion rules to the arguments.
-
-    Type promotion in NumPy works similarly to the rules in languages
-    like C++, with some slight differences.  When both scalars and
-    arrays are used, the array's type takes precedence and the actual value
-    of the scalar is taken into account.
-
-    For example, calculating 3*a, where a is an array of 32-bit floats,
-    intuitively should result in a 32-bit float output.  If the 3 is a
-    32-bit integer, the NumPy rules indicate it can't convert losslessly
-    into a 32-bit float, so a 64-bit float should be the result type.
-    By examining the value of the constant, '3', we see that it fits in
-    an 8-bit integer, which can be cast losslessly into the 32-bit float.
+    :ref:`type promotion <arrays.promotion>` rules to the arguments.
 
     Parameters
     ----------
@@ -712,36 +731,13 @@ def result_type(*arrays_and_dtypes):
     --------
     dtype, promote_types, min_scalar_type, can_cast
 
-    Notes
-    -----
-    .. versionadded:: 1.6.0
-
-    The specific algorithm used is as follows.
-
-    Categories are determined by first checking which of boolean,
-    integer (int/uint), or floating point (float/complex) the maximum
-    kind of all the arrays and the scalars are.
-
-    If there are only scalars or the maximum category of the scalars
-    is higher than the maximum category of the arrays,
-    the data types are combined with :func:`promote_types`
-    to produce the return value.
-
-    Otherwise, `min_scalar_type` is called on each scalar, and
-    the resulting data types are all combined with :func:`promote_types`
-    to produce the return value.
-
-    The set of int values is not a subset of the uint values for types
-    with the same number of bits, something not reflected in
-    :func:`min_scalar_type`, but handled as a special case in `result_type`.
-
     Examples
     --------
     >>> import numpy as np
-    >>> np.result_type(3, np.arange(7, dtype='i1'))
+    >>> np.result_type(3, np.arange(7, dtype=np.int8))
     dtype('int8')
 
-    >>> np.result_type('i4', 'c8')
+    >>> np.result_type(np.int32, np.complex64)
     dtype('complex128')
 
     >>> np.result_type(3.0, -2)
@@ -847,19 +843,23 @@ def dot(a, b, out=None):
 
 
 @array_function_from_c_func_and_dispatcher(_multiarray_umath.vdot)
-def vdot(a, b):
-    """
+def vdot(a, b, /):
+    r"""
     vdot(a, b, /)
 
     Return the dot product of two vectors.
 
-    The vdot(`a`, `b`) function handles complex numbers differently than
-    dot(`a`, `b`).  If the first argument is complex the complex conjugate
-    of the first argument is used for the calculation of the dot product.
+    The `vdot` function handles complex numbers differently than `dot`:
+    if the first argument is complex, it is replaced by its complex conjugate
+    in the dot product calculation. `vdot` also handles multidimensional
+    arrays differently than `dot`: it does not perform a matrix product, but
+    flattens the arguments to 1-D arrays before taking a vector dot product.
 
-    Note that `vdot` handles multidimensional arrays differently than `dot`:
-    it does *not* perform a matrix product, but flattens input arguments
-    to 1-D vectors first. Consequently, it should only be used for vectors.
+    Consequently, when the arguments are 2-D arrays of the same shape, this
+    function effectively returns their
+    `Frobenius inner product <https://en.wikipedia.org/wiki/Frobenius_inner_product>`_
+    (also known as the *trace inner product* or the *standard inner product*
+    on a vector space of matrices).
 
     Parameters
     ----------
@@ -906,7 +906,7 @@ def vdot(a, b):
 
 
 @array_function_from_c_func_and_dispatcher(_multiarray_umath.bincount)
-def bincount(x, weights=None, minlength=None):
+def bincount(x, /, weights=None, minlength=0):
     """
     bincount(x, /, weights=None, minlength=0)
 
@@ -929,8 +929,6 @@ def bincount(x, weights=None, minlength=None):
         Weights, array of the same shape as `x`.
     minlength : int, optional
         A minimum number of bins for the output array.
-
-        .. versionadded:: 1.6.0
 
     Returns
     -------
@@ -965,7 +963,7 @@ def bincount(x, weights=None, minlength=None):
     The input array needs to be of integer dtype, otherwise a
     TypeError is raised:
 
-    >>> np.bincount(np.arange(5, dtype=float))
+    >>> np.bincount(np.arange(5, dtype=np.float64))
     Traceback (most recent call last):
       ...
     TypeError: Cannot cast array data from dtype('float64') to dtype('int64')
@@ -984,7 +982,7 @@ def bincount(x, weights=None, minlength=None):
 
 
 @array_function_from_c_func_and_dispatcher(_multiarray_umath.ravel_multi_index)
-def ravel_multi_index(multi_index, dims, mode=None, order=None):
+def ravel_multi_index(multi_index, dims, mode="raise", order="C"):
     """
     ravel_multi_index(multi_index, dims, mode='raise', order='C')
 
@@ -1022,10 +1020,6 @@ def ravel_multi_index(multi_index, dims, mode=None, order=None):
     --------
     unravel_index
 
-    Notes
-    -----
-    .. versionadded:: 1.6.0
-
     Examples
     --------
     >>> import numpy as np
@@ -1046,7 +1040,7 @@ def ravel_multi_index(multi_index, dims, mode=None, order=None):
 
 
 @array_function_from_c_func_and_dispatcher(_multiarray_umath.unravel_index)
-def unravel_index(indices, shape=None, order=None):
+def unravel_index(indices, shape, order="C"):
     """
     unravel_index(indices, shape, order='C')
 
@@ -1061,15 +1055,9 @@ def unravel_index(indices, shape=None, order=None):
         this function accepted just one index value.
     shape : tuple of ints
         The shape of the array to use for unraveling ``indices``.
-
-        .. versionchanged:: 1.16.0
-            Renamed from ``dims`` to ``shape``.
-
     order : {'C', 'F'}, optional
         Determines whether the indices should be viewed as indexing in
         row-major (C-style) or column-major (Fortran-style) order.
-
-        .. versionadded:: 1.6.0
 
     Returns
     -------
@@ -1097,7 +1085,7 @@ def unravel_index(indices, shape=None, order=None):
 
 
 @array_function_from_c_func_and_dispatcher(_multiarray_umath.copyto)
-def copyto(dst, src, casting=None, where=None):
+def copyto(dst, src, casting="same_kind", where=True):
     """
     copyto(dst, src, casting='same_kind', where=True)
 
@@ -1105,8 +1093,6 @@ def copyto(dst, src, casting=None, where=None):
 
     Raises a TypeError if the `casting` rule is violated, and if
     `where` is provided, it selects which elements to copy.
-
-    .. versionadded:: 1.7.0
 
     Parameters
     ----------
@@ -1151,7 +1137,7 @@ def copyto(dst, src, casting=None, where=None):
 @array_function_from_c_func_and_dispatcher(_multiarray_umath.putmask)
 def putmask(a, /, mask, values):
     """
-    putmask(a, mask, values)
+    putmask(a, /, mask, values)
 
     Changes elements of an array based on conditional and input values.
 
@@ -1195,7 +1181,7 @@ def putmask(a, /, mask, values):
 
 
 @array_function_from_c_func_and_dispatcher(_multiarray_umath.packbits)
-def packbits(a, axis=None, bitorder='big'):
+def packbits(a, /, axis=None, bitorder="big"):
     """
     packbits(a, /, axis=None, bitorder='big')
 
@@ -1216,8 +1202,6 @@ def packbits(a, axis=None, bitorder='big'):
         ``[0, 0, 0, 0, 0, 0, 1, 1] => 3 = 0b00000011``, 'little' will
         reverse the order so ``[1, 1, 0, 0, 0, 0, 0, 0] => 3``.
         Defaults to 'big'.
-
-        .. versionadded:: 1.17.0
 
     Returns
     -------
@@ -1254,7 +1238,7 @@ def packbits(a, axis=None, bitorder='big'):
 
 
 @array_function_from_c_func_and_dispatcher(_multiarray_umath.unpackbits)
-def unpackbits(a, axis=None, count=None, bitorder='big'):
+def unpackbits(a, /, axis=None, count=None, bitorder="big"):
     """
     unpackbits(a, /, axis=None, count=None, bitorder='big')
 
@@ -1281,16 +1265,11 @@ def unpackbits(a, axis=None, count=None, bitorder='big'):
         default). Counts larger than the available number of bits will
         add zero padding to the output. Negative counts must not
         exceed the available number of bits.
-
-        .. versionadded:: 1.17.0
-
     bitorder : {'big', 'little'}, optional
         The order of the returned bits. 'big' will mimic bin(val),
         ``3 = 0b00000011 => [0, 0, 0, 0, 0, 0, 1, 1]``, 'little' will reverse
         the order to ``[1, 1, 0, 0, 0, 0, 0, 0]``.
         Defaults to 'big'.
-
-        .. versionadded:: 1.17.0
 
     Returns
     -------
@@ -1339,9 +1318,9 @@ def unpackbits(a, axis=None, count=None, bitorder='big'):
 
 
 @array_function_from_c_func_and_dispatcher(_multiarray_umath.shares_memory)
-def shares_memory(a, b, max_work=None):
+def shares_memory(a, b, /, max_work=-1):
     """
-    shares_memory(a, b, /, max_work=None)
+    shares_memory(a, b, /, max_work=-1)
 
     Determine if two arrays share memory.
 
@@ -1418,9 +1397,9 @@ def shares_memory(a, b, max_work=None):
 
 
 @array_function_from_c_func_and_dispatcher(_multiarray_umath.may_share_memory)
-def may_share_memory(a, b, max_work=None):
+def may_share_memory(a, b, /, max_work=0):
     """
-    may_share_memory(a, b, /, max_work=None)
+    may_share_memory(a, b, /, max_work=0)
 
     Determine if two arrays might share memory
 
@@ -1460,19 +1439,17 @@ def may_share_memory(a, b, max_work=None):
 
 
 @array_function_from_c_func_and_dispatcher(_multiarray_umath.is_busday)
-def is_busday(dates, weekmask=None, holidays=None, busdaycal=None, out=None):
+def is_busday(dates, weekmask="1111100", holidays=None, busdaycal=None, out=None):
     """
     is_busday(
         dates,
         weekmask='1111100',
         holidays=None,
         busdaycal=None,
-        out=None
+        out=None,
     )
 
     Calculates which of the given dates are valid days, and which are not.
-
-    .. versionadded:: 1.7.0
 
     Parameters
     ----------
@@ -1521,7 +1498,7 @@ def is_busday(dates, weekmask=None, holidays=None, busdaycal=None, out=None):
 
 
 @array_function_from_c_func_and_dispatcher(_multiarray_umath.busday_offset)
-def busday_offset(dates, offsets, roll=None, weekmask=None, holidays=None,
+def busday_offset(dates, offsets, roll="raise", weekmask="1111100", holidays=None,
                   busdaycal=None, out=None):
     """
     busday_offset(
@@ -1531,14 +1508,12 @@ def busday_offset(dates, offsets, roll=None, weekmask=None, holidays=None,
         weekmask='1111100',
         holidays=None,
         busdaycal=None,
-        out=None
+        out=None,
     )
 
     First adjusts the date to fall on a valid day according to
     the ``roll`` rule, then applies offsets to the given dates
     counted in valid days.
-
-    .. versionadded:: 1.7.0
 
     Parameters
     ----------
@@ -1625,7 +1600,7 @@ def busday_offset(dates, offsets, roll=None, weekmask=None, holidays=None,
 
 
 @array_function_from_c_func_and_dispatcher(_multiarray_umath.busday_count)
-def busday_count(begindates, enddates, weekmask=None, holidays=None,
+def busday_count(begindates, enddates, weekmask="1111100", holidays=(),
                  busdaycal=None, out=None):
     """
     busday_count(
@@ -1642,8 +1617,6 @@ def busday_count(begindates, enddates, weekmask=None, holidays=None,
 
     If ``enddates`` specifies a date value that is earlier than the
     corresponding ``begindates`` date value, the count will be negative.
-
-    .. versionadded:: 1.7.0
 
     Parameters
     ----------
@@ -1700,9 +1673,8 @@ def busday_count(begindates, enddates, weekmask=None, holidays=None,
     return (begindates, enddates, weekmask, holidays, out)
 
 
-@array_function_from_c_func_and_dispatcher(
-    _multiarray_umath.datetime_as_string)
-def datetime_as_string(arr, unit=None, timezone=None, casting=None):
+@array_function_from_c_func_and_dispatcher(_multiarray_umath.datetime_as_string)
+def datetime_as_string(arr, unit=None, timezone="naive", casting="same_kind"):
     """
     datetime_as_string(arr, unit=None, timezone='naive', casting='same_kind')
 
@@ -1731,7 +1703,7 @@ def datetime_as_string(arr, unit=None, timezone=None, casting=None):
     Examples
     --------
     >>> import numpy as np
-    >>> import pytz
+    >>> from zoneinfo import ZoneInfo
     >>> d = np.arange('2002-10-27T04:30', 4*60, 60, dtype='M8[m]')
     >>> d
     array(['2002-10-27T04:30', '2002-10-27T05:30', '2002-10-27T06:30',
@@ -1744,9 +1716,9 @@ def datetime_as_string(arr, unit=None, timezone=None, casting=None):
            '2002-10-27T07:30Z'], dtype='<U35')
 
     Note that we picked datetimes that cross a DST boundary. Passing in a
-    ``pytz`` timezone object will print the appropriate offset
+    ``ZoneInfo`` object will print the appropriate offset
 
-    >>> np.datetime_as_string(d, timezone=pytz.timezone('US/Eastern'))
+    >>> np.datetime_as_string(d, timezone=ZoneInfo('US/Eastern'))
     array(['2002-10-27T00:30-0400', '2002-10-27T01:30-0400',
            '2002-10-27T01:30-0500', '2002-10-27T02:30-0500'], dtype='<U39')
 

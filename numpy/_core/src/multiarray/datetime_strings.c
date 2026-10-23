@@ -23,6 +23,9 @@
 #include "_datetime.h"
 #include "datetime_strings.h"
 
+#include <ctype.h>
+#include <stdio.h>
+#include <string.h>
 #include <time.h>
 
 /*
@@ -984,7 +987,7 @@ NpyDatetime_MakeISO8601Datetime(
      * the string representation, so ensure that the data
      * is being cast according to the casting rule.
      */
-    if (casting != NPY_UNSAFE_CASTING) {
+    if ((casting != NPY_UNSAFE_CASTING) && ((casting & NPY_SAME_VALUE_CASTING_FLAG) == 0)) {
         /* Producing a date as a local time is always 'unsafe' */
         if (base <= NPY_FR_D && local) {
             PyErr_SetString(PyExc_TypeError, "Cannot create a local "
